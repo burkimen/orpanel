@@ -39,5 +39,7 @@
   "SettingThemeDesc": "Choose interface theme. When System is selected, it follows your browser preference.",
   "ThemeLight": "Light",
   "ThemeDark": "Dark",
-  "ThemeSystem": "System"
+  "ThemeSystem": "System",
+  "TrayInstallOmni": "OmniRoute Install Required",
+  "TrayInstalling": "Installing..."
 }

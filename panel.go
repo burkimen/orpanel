@@ -591,6 +591,7 @@ const htmlTemplate = `
     }
     function renderHealth(h) {
         if (!healthCard || !h) return;
+        window.lastHealth = h;
         healthCard.style.display = 'flex';
         const isEn = "{{.Lang}}" === "en";
         let badgeText = h.status, badgeCls = "error", icon = "warning";
@@ -599,6 +600,7 @@ const htmlTemplate = `
         else if (h.status === "not_installed") { badgeText = isEn ? "Not installed" : "Kurulu değil"; badgeCls = "error"; icon = "cloud_off"; }
         else if (h.status === "port_conflict") { badgeText = isEn ? "Port conflict" : "Port çakışması"; badgeCls = "error"; icon = "error"; }
         else if (h.status === "corrupt") { badgeText = isEn ? "Corrupt" : "Bozuk"; badgeCls = "error"; icon = "broken_image"; }
+        else if (h.status === "installing") { badgeText = isEn ? "Installing" : "Kuruluyor"; badgeCls = "warn"; icon = "hourglass_top"; }
         healthBadge.textContent = badgeText;
         healthBadge.className = "health-badge " + badgeCls;
         healthIcon.textContent = icon;
@@ -639,6 +641,17 @@ const htmlTemplate = `
             acts += '<button class="btn-health ghost" '+(busy?"disabled":"")+' onclick="doOmniAction(\'reinstall\')"><span class="material-symbols-rounded">restart_alt</span> '+(isEn?"Reinstall":"Yeniden Kur")+'</button>';
         }
         healthActions.innerHTML = acts;
+        // Disable main controls when not installed or installing
+        const shouldDisableControls = !h.installed || h.opRunning || h.status === 'installing' || h.status === 'not_installed' || h.health === 'installing';
+        [btnStart, btnStop, btnRestart, btnOpenOmni].forEach(btn => {
+            if (shouldDisableControls) {
+                btn.disabled = true;
+                btn.setAttribute('title', h.message);
+            } else {
+                btn.removeAttribute('title');
+            }
+        });
+        if (!shouldDisableControls) checkStatus();
     }
     async function doOmniAction(action) {
         const btns = healthActions.querySelectorAll('button');
@@ -670,6 +683,15 @@ const htmlTemplate = `
     }
 
     function updateUI(isRunning) {
+        const h = window.lastHealth;
+        const block = h && (!h.installed || h.opRunning || h.status === 'installing' || h.status === 'not_installed' || h.health === 'installing');
+        if (block) {
+            statusText.textContent = h ? h.message : txtClosed;
+            statusBadge.classList.remove("active");
+            statusBadge.querySelector('.material-symbols-rounded').textContent = "cloud_off";
+            btnStart.disabled = true; btnStop.disabled = true; btnRestart.disabled = true; btnOpenOmni.disabled = true;
+            return;
+        }
         if (isRunning) {
             statusText.textContent = txtActive;
             statusBadge.classList.add("active");
@@ -912,6 +934,17 @@ func startOmniroute() {
 		return
 	}
 
+	// OmniRoute kurulu mu kontrolü (uninstall sonrası Dir geçersiz hatasını önle)
+	if !isOmnirouteDir(OmniroutePath) {
+		// path'i yenile
+		OmniroutePath = getOmniroutePathEnhanced()
+		StartArgs = filepath.Join(OmniroutePath, "bin", "omniroute.mjs")
+		if !isOmnirouteDir(OmniroutePath) {
+			writeLog("INFO: OmniRoute kurulu değil (%s), otomatik başlatma atlandı. Web'den 'Kurulumu Başlat' ile kurun.", OmniroutePath)
+			return
+		}
+	}
+
 	isIntentionalStop = false
 	t := loadTranslations(currentLang)
 	writeLog("%s", t["LogStarting"])
@@ -1020,6 +1053,10 @@ func startWatchdog() {
 			shouldRestart := cmd == nil && !isIntentionalStop
 			cmdMutex.Unlock()
 			if !shouldRestart {
+				continue
+			}
+			// If OmniRoute not installed, don't auto-restart (user must click install)
+			if !isOmnirouteDir(getOmniroutePathEnhanced()) {
 				continue
 			}
 			// Respect crash backoff, but if port now free, clear EADDRINUSE backoff
@@ -1267,12 +1304,43 @@ func onReady() {
 
 	go func() {
 		var wasRunning bool = false
+		var wasDisabled bool = false
 		for {
 			time.Sleep(500 * time.Millisecond)
 			
 			cmdMutex.Lock()
 			isRunning := (cmd != nil && cmd.Process != nil)
 			cmdMutex.Unlock()
+			installed := isOmnirouteDir(getOmniroutePathEnhanced())
+			opRunning := isOmniOpRunning()
+			shouldDisable := !installed || opRunning
+
+			if shouldDisable != wasDisabled {
+				if shouldDisable {
+					mToggle.Disable()
+					mOpenOmni.Disable()
+				} else {
+					mToggle.Enable()
+					// mOpenOmni state depends on isRunning
+					if isRunning {
+						mOpenOmni.Enable()
+					} else {
+						mOpenOmni.Disable()
+					}
+				}
+				wasDisabled = shouldDisable
+			}
+			if shouldDisable {
+				// keep title as "Kurulum bekleniyor" when disabled? use current lang
+				cNow := loadConfig()
+				tNow := loadTranslations(cNow.Language)
+				if !installed {
+					mToggle.SetTitle(tNow["TrayInstallOmni"])
+				} else if opRunning {
+					mToggle.SetTitle(tNow["TrayInstalling"])
+				}
+				continue
+			}
 
 			cNow := loadConfig()
 			tNow := loadTranslations(cNow.Language)
@@ -1297,6 +1365,9 @@ func onReady() {
 			case <-mOpenOmni.ClickedCh:
 				openBrowser("http://localhost:20128")
 			case <-mToggle.ClickedCh:
+				if !isOmnirouteDir(getOmniroutePathEnhanced()) || isOmniOpRunning() {
+					continue
+				}
 				cmdMutex.Lock()
 				isRunning := (cmd != nil && cmd.Process != nil)
 				cmdMutex.Unlock()

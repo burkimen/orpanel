@@ -39,5 +39,7 @@
   "SettingThemeDesc": "Elige el tema de la interfaz. Con Sistema, sigue la preferencia del navegador.",
   "ThemeLight": "Claro",
   "ThemeDark": "Oscuro",
-  "ThemeSystem": "Sistema"
+  "ThemeSystem": "Sistema",
+  "TrayInstallOmni": "Instalación de OmniRoute requerida",
+  "TrayInstalling": "Instalando..."
 }

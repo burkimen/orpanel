@@ -39,5 +39,7 @@
   "SettingThemeDesc": "Arayüz temasını seçin. Sistem seçiliyken tarayıcınızın tercihine göre otomatik uyum sağlar.",
   "ThemeLight": "Açık",
   "ThemeDark": "Koyu",
-  "ThemeSystem": "Sistem"
+  "ThemeSystem": "Sistem",
+  "TrayInstallOmni": "OmniRoute Kurulumu Gerekli",
+  "TrayInstalling": "Kuruluyor..."
 }

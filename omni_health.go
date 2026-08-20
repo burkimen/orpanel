@@ -21,10 +21,11 @@ type OmniHealth struct {
 	UpdateAvailable bool   `json:"updateAvailable"`
 	NodeVersion     string `json:"nodeVersion"`
 	NodeOk          bool   `json:"nodeOk"`
-	Status          string `json:"status"` // running|stopped|not_installed|corrupt|port_conflict
+	Status          string `json:"status"` // running|stopped|not_installed|corrupt|port_conflict|installing
 	PortFree        bool   `json:"portFree"`
 	Health          string `json:"health"` // ok|port_conflict|missing_deps|not_installed
 	Message         string `json:"message"`
+	OpRunning       bool   `json:"opRunning"`
 }
 
 var (
@@ -38,6 +39,12 @@ var (
 	nodeCacheTime   time.Time
 	nodeCacheMu     sync.Mutex
 )
+
+func isOmniOpRunning() bool {
+	omniOpMu.Lock()
+	defer omniOpMu.Unlock()
+	return omniOpRunning
+}
 
 func getNodeVersion() (string, bool) {
 	nodeCacheMu.Lock()
@@ -216,7 +223,7 @@ func checkOmniHealth() OmniHealth {
 			msg = "Node.js bulunamadı, önce Node.js kurun"
 		}
 	}
-	return OmniHealth{
+	h := OmniHealth{
 		Installed:       installed,
 		Path:            path,
 		Version:         ver,
@@ -229,6 +236,15 @@ func checkOmniHealth() OmniHealth {
 		Health:          health,
 		Message:         msg,
 	}
+	omniOpMu.Lock()
+	h.OpRunning = omniOpRunning
+	omniOpMu.Unlock()
+	if h.OpRunning {
+		h.Status = "installing"
+		h.Health = "installing"
+		h.Message = "OmniRoute işlemi devam ediyor, lütfen bekleyin..."
+	}
+	return h
 }
 
 func handleOmniHealth(w http.ResponseWriter, r *http.Request) {
@@ -276,10 +292,18 @@ func runNpmOmni(op string, args ...string) {
 		writeLog("ERROR: npm %s başarısız: %v", strings.Join(args, " "), err)
 	} else {
 		writeLog("SUCCESS: npm %s tamamlandı", strings.Join(args, " "))
-		// invalidate latest cache after install/update
+		// invalidate caches after install/update
 		latestMu.Lock()
 		latestCache = ""
 		latestMu.Unlock()
+		cachedOmniPath = ""
+		cachedOmniPathTime = time.Time{}
+		OmniroutePath = getOmniroutePathEnhanced()
+		StartArgs = filepath.Join(OmniroutePath, "bin", "omniroute.mjs")
+		writeLog("INFO: OmniRoute yolu yenilendi: %s", OmniroutePath)
+		// auto-start after successful install/update
+		time.Sleep(800 * time.Millisecond)
+		go startOmniroute()
 	}
 }
 
@@ -381,6 +405,13 @@ func handleOmniReinstall(w http.ResponseWriter, r *http.Request) {
 			latestMu.Lock()
 			latestCache = ""
 			latestMu.Unlock()
+			cachedOmniPath = ""
+			cachedOmniPathTime = time.Time{}
+			OmniroutePath = getOmniroutePathEnhanced()
+			StartArgs = filepath.Join(OmniroutePath, "bin", "omniroute.mjs")
+			writeLog("INFO: OmniRoute yolu yenilendi: %s", OmniroutePath)
+			time.Sleep(800 * time.Millisecond)
+			go startOmniroute()
 		}
 	}()
 	w.Header().Set("Content-Type", "application/json")
