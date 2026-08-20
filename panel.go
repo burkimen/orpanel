@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -41,6 +42,8 @@ const AppName = "OmniroutePanel"
 const LogFileName = "panel.log"
 const ConfigFileName = "config.json"
 const LocalesDir = "locales"
+const OmniPort = 20128
+const logMaxBytes = 5 * 1024 * 1024
 // ----------------------------------
 
 const ThemeLight = "light"
@@ -68,6 +71,9 @@ var (
 	isIntentionalStop bool
 	currentLang       = "tr"
 	configMutex       sync.Mutex
+	watchdogFailCount int
+	watchdogLastFail  time.Time
+	crashBackoffUntil time.Time
 )
 
 type StatusResponse struct {
@@ -167,6 +173,128 @@ func loadTranslations(lang string) map[string]string {
 	var t map[string]string
 	json.Unmarshal(file, &t)
 	return t
+}
+
+// --- Port helpers (EADDRINUSE fix) ---
+func isPortInUse(port int) bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 500*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+func killPortHolders(port int) int {
+	killed := 0
+	if runtime.GOOS == "windows" {
+		// Prefer PowerShell Get-NetTCPConnection
+		psCmd := fmt.Sprintf("Get-NetTCPConnection -LocalPort %d -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique", port)
+		cmd := exec.Command("powershell", "-NoProfile", "-Command", psCmd)
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		out, err := cmd.Output()
+		if err == nil {
+			for _, line := range strings.Split(string(out), "\n") {
+				pidStr := strings.TrimSpace(line)
+				if pidStr == "" {
+					continue
+				}
+				pid, err := strconv.Atoi(pidStr)
+				if err != nil || pid == os.Getpid() {
+					continue
+				}
+				// avoid killing system idle (0) or very low pids
+				if pid < 100 {
+					continue
+				}
+				exec.Command("taskkill", "/F", "/PID", strconv.Itoa(pid)).Run()
+				killed++
+			}
+			if killed > 0 {
+				return killed
+			}
+		}
+		// fallback: netstat
+		out2, err := exec.Command("cmd", "/c", fmt.Sprintf("netstat -ano | findstr :%d", port)).Output()
+		if err == nil {
+			for _, line := range strings.Split(string(out2), "\n") {
+				fields := strings.Fields(line)
+				if len(fields) == 0 {
+					continue
+				}
+				pidStr := fields[len(fields)-1]
+				pid, err := strconv.Atoi(pidStr)
+				if err != nil || pid == os.Getpid() || pid < 100 {
+					continue
+				}
+				exec.Command("taskkill", "/F", "/PID", pidStr).Run()
+				killed++
+			}
+		}
+	} else {
+		// macOS / Linux
+		out, err := exec.Command("sh", "-c", fmt.Sprintf("lsof -ti:%d 2>/dev/null", port)).Output()
+		if err == nil {
+			for _, pidStr := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+				pidStr = strings.TrimSpace(pidStr)
+				if pidStr == "" {
+					continue
+				}
+				exec.Command("kill", "-9", pidStr).Run()
+				killed++
+			}
+		}
+		if killed == 0 {
+			// fallback: fuser
+			exec.Command("sh", "-c", fmt.Sprintf("fuser -k %d/tcp 2>/dev/null", port)).Run()
+		}
+	}
+	return killed
+}
+
+func ensurePortFree(port int) bool {
+	if !isPortInUse(port) {
+		return true
+	}
+	writeLog("WARN: Port %d dolu, temizleniyor...", port)
+	killPortHolders(port)
+	time.Sleep(1200 * time.Millisecond)
+	if isPortInUse(port) {
+		// second attempt - broader: kill node.exe that may be omniroute
+		if runtime.GOOS == "windows" {
+			exec.Command("taskkill", "/F", "/IM", "node.exe").Run()
+			time.Sleep(800 * time.Millisecond)
+		}
+	}
+	return !isPortInUse(port)
+}
+
+func rotateLogIfNeeded() {
+	if fileLogWriter == nil {
+		return
+	}
+	info, err := os.Stat(LogFileName)
+	if err != nil {
+		return
+	}
+	if info.Size() < logMaxBytes {
+		return
+	}
+	fileLogWriter.Close()
+	// keep last 50KB
+	data, err := os.ReadFile(LogFileName)
+	if err == nil && len(data) > 50*1024 {
+		data = data[len(data)-50*1024:]
+		// cut to next newline
+		if idx := strings.Index(string(data), "\n"); idx != -1 {
+			data = data[idx+1:]
+		}
+		os.WriteFile(LogFileName, data, 0644)
+	}
+	f, err := os.OpenFile(LogFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err == nil {
+		fileLogWriter = f
+	}
 }
 
 const htmlTemplate = `
@@ -539,6 +667,19 @@ const htmlTemplate = `
 
 func initFileLog() {
 	var err error
+	// rotate if oversized before opening
+	if info, err2 := os.Stat(LogFileName); err2 == nil && info.Size() > logMaxBytes {
+		data, err3 := os.ReadFile(LogFileName)
+		if err3 == nil && len(data) > 50*1024 {
+			cut := data[len(data)-50*1024:]
+			if idx := strings.Index(string(cut), "\n"); idx != -1 {
+				cut = cut[idx+1:]
+			}
+			_ = os.WriteFile(LogFileName, cut, 0644)
+		} else if err3 == nil {
+			_ = os.WriteFile(LogFileName, data, 0644)
+		}
+	}
 	fileLogWriter, err = os.OpenFile(LogFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 		fmt.Printf("Log dosyası açılamadı: %v\n", err)
@@ -548,7 +689,48 @@ func initFileLog() {
 func writeLog(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
 	timestamped := fmt.Sprintf("[%s] %s", time.Now().Format("2006-01-02 15:04:05"), msg)
-	
+
+	// Detect EADDRINUSE crash to trigger backoff (debounced)
+	if strings.Contains(msg, "EADDRINUSE") {
+		logMutex.Lock()
+		now := time.Now()
+		// debounce: same burst within 5s counts as one failure
+		if now.Sub(watchdogLastFail) < 5*time.Second && watchdogFailCount > 0 {
+			// just extend backoff slightly, do not increment failCount
+			if now.After(crashBackoffUntil) {
+				crashBackoffUntil = now.Add(30 * time.Second)
+			}
+			logMutex.Unlock()
+		} else {
+			watchdogFailCount++
+			watchdogLastFail = now
+			backoff := time.Duration(30*(1<<min(watchdogFailCount-1, 3))) * time.Second
+			if backoff > 300*time.Second {
+				backoff = 300 * time.Second
+			}
+			crashBackoffUntil = now.Add(backoff)
+			fc := watchdogFailCount
+			bb := crashBackoffUntil
+			logMutex.Unlock()
+			// avoid recursion: direct write
+			ts := fmt.Sprintf("[%s] BACKOFF: Port %d çakışması algılandı, %v beklemeye alındı (fail #%d, until %s)", time.Now().Format("2006-01-02 15:04:05"), OmniPort, backoff, fc, bb.Format("15:04:05"))
+			logMutex.Lock()
+			logBuffer = append(logBuffer, ts)
+			if len(logBuffer) > maxLogSize {
+				logBuffer = logBuffer[1:]
+			}
+			logMutex.Unlock()
+			if fileLogWriter != nil {
+				fileLogWriter.WriteString(ts + "\n")
+			}
+		}
+	} else if strings.Contains(msg, "OmniRoute is running") {
+		logMutex.Lock()
+		watchdogFailCount = 0
+		crashBackoffUntil = time.Time{}
+		logMutex.Unlock()
+	}
+
 	logMutex.Lock()
 	logBuffer = append(logBuffer, timestamped)
 	if len(logBuffer) > maxLogSize {
@@ -558,6 +740,10 @@ func writeLog(format string, args ...interface{}) {
 
 	if fileLogWriter != nil {
 		fileLogWriter.WriteString(timestamped + "\n")
+		if info, err := fileLogWriter.Stat(); err == nil && info.Size() > logMaxBytes {
+			// async rotate to avoid blocking
+			go rotateLogIfNeeded()
+		}
 	}
 }
 
@@ -617,6 +803,34 @@ func startOmniroute() {
 	defer cmdMutex.Unlock()
 
 	if cmd != nil && cmd.Process != nil {
+		return
+	}
+
+	// Backoff check - EADDRINUSE loop prevention, but if port now free, clear EADDRINUSE backoff
+	logMutex.Lock()
+	bb := crashBackoffUntil
+	logMutex.Unlock()
+	if !bb.IsZero() && time.Now().Before(bb) {
+		if !isPortInUse(OmniPort) {
+			// port freed externally, clear EADDRINUSE backoff to allow quick recovery
+			logMutex.Lock()
+			watchdogFailCount = 0
+			crashBackoffUntil = time.Time{}
+			logMutex.Unlock()
+			writeLog("INFO: Port %d serbest kaldı, backoff temizlendi", OmniPort)
+		} else {
+			writeLog("INFO: Backoff aktif (%v kaldı), başlatma atlandı", time.Until(bb).Round(time.Second))
+			return
+		}
+	}
+
+	// Port collision check before spawn
+	if !ensurePortFree(OmniPort) {
+		writeLog("ERROR: Port %d hâlâ dolu, OmniRoute başlatılamadı. 15s sonra watchdog tekrar deneyecek.", OmniPort)
+		logMutex.Lock()
+		watchdogFailCount++
+		crashBackoffUntil = time.Now().Add(15 * time.Second)
+		logMutex.Unlock()
 		return
 	}
 
@@ -683,19 +897,40 @@ func startOmniroute() {
 func stopOmniroute() {
 	cmdMutex.Lock()
 	defer cmdMutex.Unlock()
-	
+
 	isIntentionalStop = true
+	logMutex.Lock()
+	watchdogFailCount = 0
+	crashBackoffUntil = time.Time{}
+	logMutex.Unlock()
 	t := loadTranslations(currentLang)
 	writeLog("%s", t["LogStopSignal"])
 
 	if cmd != nil && cmd.Process != nil {
+		pid := cmd.Process.Pid
 		if runtime.GOOS == "windows" {
-			exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(cmd.Process.Pid)).Run()
+			exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid)).Run()
 		} else {
 			cmd.Process.Kill()
 		}
 		cmd = nil
 		writeLog("%s", t["LogProcessesKilled"])
+	}
+	// Extra: ensure port 20128 fully freed (orphan nodes)
+	time.Sleep(400 * time.Millisecond)
+	if isPortInUse(OmniPort) {
+		killed := killPortHolders(OmniPort)
+		if killed > 0 {
+			writeLog("INFO: Port %d için %d yetim süreç temizlendi", OmniPort, killed)
+			time.Sleep(600 * time.Millisecond)
+		}
+		if isPortInUse(OmniPort) {
+			writeLog("WARN: Port %d hâlâ dolu, node.exe zorla kapatılıyor", OmniPort)
+			if runtime.GOOS == "windows" {
+				exec.Command("taskkill", "/F", "/IM", "node.exe").Run()
+				time.Sleep(500 * time.Millisecond)
+			}
+		}
 	}
 }
 
@@ -704,14 +939,48 @@ func startWatchdog() {
 		for {
 			time.Sleep(5 * time.Second)
 			cmdMutex.Lock()
-			if cmd == nil && !isIntentionalStop {
-				cmdMutex.Unlock()
-				t := loadTranslations(currentLang)
-				writeLog("%s", t["LogWatchdog"])
-				startOmniroute()
-			} else {
-				cmdMutex.Unlock()
+			shouldRestart := cmd == nil && !isIntentionalStop
+			cmdMutex.Unlock()
+			if !shouldRestart {
+				continue
 			}
+			// Respect crash backoff, but if port now free, clear EADDRINUSE backoff
+			logMutex.Lock()
+			bb := crashBackoffUntil
+			failCnt := watchdogFailCount
+			logMutex.Unlock()
+			if !bb.IsZero() && time.Now().Before(bb) {
+				if !isPortInUse(OmniPort) {
+					logMutex.Lock()
+					watchdogFailCount = 0
+					crashBackoffUntil = time.Time{}
+					logMutex.Unlock()
+					writeLog("INFO: Port %d serbest kaldı, watchdog backoff temizlendi", OmniPort)
+				} else {
+					if failCnt > 0 && time.Now().Sub(watchdogLastFail) > 10*time.Second {
+						writeLog("INFO: Backoff aktif, watchdog beklemede (remaining %v)", time.Until(bb).Round(time.Second))
+						logMutex.Lock()
+						watchdogLastFail = time.Now()
+						logMutex.Unlock()
+					}
+					continue
+				}
+			}
+			// Port still occupied after cleanup attempts -> log once and backoff
+			if isPortInUse(OmniPort) {
+				if !ensurePortFree(OmniPort) {
+					writeLog("WARN: Port %d dolu, watchdog beklemede (fail #%d)", OmniPort, failCnt+1)
+					logMutex.Lock()
+					watchdogFailCount++
+					watchdogLastFail = time.Now()
+					crashBackoffUntil = time.Now().Add(30 * time.Second)
+					logMutex.Unlock()
+					continue
+				}
+			}
+			t := loadTranslations(currentLang)
+			writeLog("%s", t["LogWatchdog"])
+			startOmniroute()
 		}
 	}()
 }
