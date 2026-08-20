@@ -333,7 +333,7 @@ const htmlTemplate = `
                 <span class="dot green"></span>
             </div>
             <div class="brand">
-                <div class="brand-icon"><span class="material-symbols-rounded">route</span></div>
+                <div class="brand-icon"><svg width="18" height="18" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="16" cy="16" r="3" fill="white"/><circle cx="8" cy="8" r="2" fill="white"/><circle cx="24" cy="8" r="2" fill="white"/><circle cx="8" cy="24" r="2" fill="white"/><circle cx="24" cy="24" r="2" fill="white"/><circle cx="16" cy="5" r="1.5" fill="white"/><circle cx="16" cy="27" r="1.5" fill="white"/><line x1="16" y1="13" x2="8" y2="8" stroke="white" stroke-width="1.2" stroke-linecap="round"/><line x1="16" y1="13" x2="24" y2="8" stroke="white" stroke-width="1.2" stroke-linecap="round"/><line x1="16" y1="19" x2="8" y2="24" stroke="white" stroke-width="1.2" stroke-linecap="round"/><line x1="16" y1="19" x2="24" y2="24" stroke="white" stroke-width="1.2" stroke-linecap="round"/><line x1="16" y1="13" x2="16" y2="5" stroke="white" stroke-width="1.2" stroke-linecap="round"/><line x1="16" y1="19" x2="16" y2="27" stroke="white" stroke-width="1.2" stroke-linecap="round"/></svg></div>
                 <h1>{{.T.Header}}</h1>
             </div>
         </div>
