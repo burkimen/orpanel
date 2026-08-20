@@ -41,9 +41,7 @@
                 <span id="topbarSubtitle">{{.T.TopbarSubtitle}}</span>
             </div>
             <div class="topbar-right">
-                <div class="topbar-search"><span class="material-symbols-rounded">search</span> {{.T.TopbarSearch}} <kbd>Ctrl+K</kbd></div>
-                <div class="topbar-lang"><img id="topbarFlag" src="https://flagcdn.com/w40/tr.png" alt="TR"> <span id="topbarLang">TR</span></div>
-                <button class="topbar-icon" onclick="cycleTheme()"><span class="material-symbols-rounded">light_mode</span></button>
+                <button class="topbar-icon" onclick="cycleTheme()" title="{{.T.SettingTheme}}"><span class="material-symbols-rounded" id="themeIcon">light_mode</span></button>
                 <div id="statusBadge" class="status-badge"><span class="material-symbols-rounded">radio_button_unchecked</span><span id="statusText">{{.T.StatusClosed}}</span></div>
             </div>
         </header>
