@@ -66,5 +66,10 @@
   "TermErr": "Hata",
   "TermReqErr": "İstek hatası",
   "TermNodeHelp": "Node.js 22+ kurun: https://nodejs.org/",
-  "HealthProgress": "Kurulum devam ediyor..."
+  "HealthProgress": "Kurulum devam ediyor...",
+  "SearchPlaceholder": "Ara",
+  "SearchShort": "Ara",
+  "SidebarFooter": "OmniRoute Kontrol Paneli",
+  "TopbarSubtitle": "OmniRoute'a hoş geldiniz",
+  "TopbarSearch": "Hızlı gezinme"
 }

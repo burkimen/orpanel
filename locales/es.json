@@ -66,5 +66,10 @@
   "TermErr": "Error",
   "TermReqErr": "Error de solicitud",
   "TermNodeHelp": "Instala Node.js 22+: https://nodejs.org/",
-  "HealthProgress": "Instalación en progreso..."
+  "HealthProgress": "Instalación en progreso...",
+  "SearchPlaceholder": "Buscar",
+  "SearchShort": "Buscar",
+  "SidebarFooter": "Panel de control OmniRoute",
+  "TopbarSubtitle": "Bienvenido a OmniRoute",
+  "TopbarSearch": "Búsqueda rápida"
 }
