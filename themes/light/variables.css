@@ -70,8 +70,8 @@
     --md-sys-color-btn-start-fg: #ffffff;
     --md-sys-color-btn-stop-bg: var(--color-error);
     --md-sys-color-btn-stop-fg: #ffffff;
-    --md-sys-color-btn-restart-bg: var(--color-surface);
-    --md-sys-color-btn-restart-fg: var(--color-text-main);
+    --md-sys-color-btn-restart-bg: var(--color-warning);
+    --md-sys-color-btn-restart-fg: #ffffff;
     --md-sys-color-btn-omni-bg: var(--color-accent);
     --md-sys-color-btn-omni-fg: #ffffff;
 }
