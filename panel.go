@@ -2,9 +2,11 @@ package main
 
 import (
 	"bufio"
+	"embed"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -15,11 +17,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"text/template"
+	"html/template"
 	"time"
 
 	"github.com/getlantern/systray"
 )
+
+//go:embed web
+var webFS embed.FS
 
 // --- EVRENSEL VE PLATFORMA DUYARLI YOL YAPILANDIRMASI ---
 func getOmniroutePath() string {
@@ -38,17 +43,6 @@ const ConfigFileName = "config.json"
 const LocalesDir = "locales"
 const OmniPort = 20128
 const logMaxBytes = 5 * 1024 * 1024
-// ----------------------------------
-
-const ThemeLight = "light"
-const ThemeDark = "dark"
-const ThemeSystem = "system"
-
-type Config struct {
-	Language  string `json:"language"`
-	AutoStart bool   `json:"auto_start"`
-	Theme     string `json:"theme"`
-}
 
 var (
 	cmd               *exec.Cmd
@@ -73,110 +67,16 @@ var (
 type StatusResponse struct {
 	IsRunning bool `json:"isRunning"`
 }
-
 type AutoStartResponse struct {
 	IsEnabled bool `json:"isEnabled"`
 }
-
 type LangResponse struct {
 	Language string `json:"language"`
 }
-
 type ThemeResponse struct {
 	Theme string `json:"theme"`
 }
 
-func isValidTheme(t string) bool {
-	return t == ThemeLight || t == ThemeDark || t == ThemeSystem
-}
-
-func loadConfigUnlocked() Config {
-	// try exeDir first, then cwd for backward compat
-	cfgPath := getConfigPath()
-	file, err := os.ReadFile(cfgPath)
-	if err != nil {
-		// fallback to cwd
-		if cfgPath != ConfigFileName {
-			file, err = os.ReadFile(ConfigFileName)
-		}
-	}
-	if err != nil {
-		return Config{Language: "tr", AutoStart: false, Theme: ThemeSystem}
-	}
-	var cfg Config
-	if err := json.Unmarshal(file, &cfg); err != nil {
-		return Config{Language: "tr", AutoStart: false, Theme: ThemeSystem}
-	}
-	if cfg.Language == "" {
-		cfg.Language = "tr"
-	}
-	if !isValidTheme(cfg.Theme) {
-		cfg.Theme = ThemeSystem
-	}
-	if cfg.Language != "" {
-		currentLang = cfg.Language
-	}
-	return cfg
-}
-
-func loadConfig() Config {
-	configMutex.Lock()
-	defer configMutex.Unlock()
-	return loadConfigUnlocked()
-}
-
-func saveConfig(lang string, autoStart bool) {
-	configMutex.Lock()
-	defer configMutex.Unlock()
-	existing := loadConfigUnlocked()
-	if lang != "" {
-		currentLang = lang
-		existing.Language = currentLang
-	} else if existing.Language == "" {
-		existing.Language = currentLang
-	}
-	existing.AutoStart = autoStart
-	if !isValidTheme(existing.Theme) {
-		existing.Theme = ThemeSystem
-	}
-	data, _ := json.MarshalIndent(existing, "", "  ")
-	os.WriteFile(getConfigPath(), data, 0644)
-}
-
-func saveTheme(theme string) error {
-	if !isValidTheme(theme) {
-		return fmt.Errorf("invalid theme: %s", theme)
-	}
-	configMutex.Lock()
-	defer configMutex.Unlock()
-	cfg := loadConfigUnlocked()
-	cfg.Theme = theme
-	if cfg.Language == "" {
-		cfg.Language = currentLang
-	}
-	if !isValidTheme(cfg.Theme) {
-		cfg.Theme = ThemeSystem
-	}
-	data, _ := json.MarshalIndent(cfg, "", "  ")
-	return os.WriteFile(getConfigPath(), data, 0644)
-}
-
-func loadTranslations(lang string) map[string]string {
-	locDir := getLocalesDir()
-	filePath := filepath.Join(locDir, lang+".json")
-	file, err := os.ReadFile(filePath)
-	if err != nil {
-		file, err = os.ReadFile(filepath.Join(locDir, "tr.json"))
-		if err != nil {
-			return map[string]string{
-				"Title": "Omniroute Control Panel",
-			}
-		}
-	}
-	var t map[string]string
-	json.Unmarshal(file, &t)
-	return t
-}
 
 // --- Port helpers (EADDRINUSE fix) ---
 func isPortInUse(port int) bool {
@@ -317,503 +217,6 @@ func rotateLogIfNeeded() {
 		fileLogWriter = f
 	}
 }
-
-const htmlTemplate = `
-<!DOCTYPE html>
-<html lang="{{.Lang}}">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{.T.Title}}</title>
-    <link rel="icon" type="image/x-icon" href="/favicon.ico">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,1,0" rel="stylesheet" />
-    <link rel="stylesheet" href="/themes/common.css">
-    <link id="theme-variables" rel="stylesheet" href="/themes/dark/variables.css">
-    <script>
-        (function(){
-            var t="{{.Theme}}";
-            var e=t;
-            if(t==="system"){
-                try{ e=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'; }catch(err){ e='dark'; }
-            }
-            var l=document.getElementById('theme-variables');
-            if(l) l.href='/themes/'+e+'/variables.css';
-        })();
-    </script>
-</head>
-<body>
-
-<div class="container">
-    <div class="header">
-        <div class="header-left">
-            <div class="traffic" aria-hidden="true">
-                <span class="dot red"></span>
-                <span class="dot yellow"></span>
-                <span class="dot green"></span>
-            </div>
-            <div class="brand">
-                <div class="brand-icon"><svg width="18" height="18" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="16" cy="16" r="3" fill="white"/><circle cx="8" cy="8" r="2" fill="white"/><circle cx="24" cy="8" r="2" fill="white"/><circle cx="8" cy="24" r="2" fill="white"/><circle cx="24" cy="24" r="2" fill="white"/><circle cx="16" cy="5" r="1.5" fill="white"/><circle cx="16" cy="27" r="1.5" fill="white"/><line x1="16" y1="13" x2="8" y2="8" stroke="white" stroke-width="1.2" stroke-linecap="round"/><line x1="16" y1="13" x2="24" y2="8" stroke="white" stroke-width="1.2" stroke-linecap="round"/><line x1="16" y1="19" x2="8" y2="24" stroke="white" stroke-width="1.2" stroke-linecap="round"/><line x1="16" y1="19" x2="24" y2="24" stroke="white" stroke-width="1.2" stroke-linecap="round"/><line x1="16" y1="13" x2="16" y2="5" stroke="white" stroke-width="1.2" stroke-linecap="round"/><line x1="16" y1="19" x2="16" y2="27" stroke="white" stroke-width="1.2" stroke-linecap="round"/></svg></div>
-                <h1>{{.T.Header}}</h1>
-            </div>
-        </div>
-        <div id="statusBadge" class="status-badge">
-            <span class="material-symbols-rounded">radio_button_unchecked</span>
-            <span id="statusText">{{.T.StatusClosed}}</span>
-        </div>
-    </div>
-
-    <div class="tabs">
-        <button class="tab-btn active" onclick="switchTab('terminal-tab', this)">
-            <span class="material-symbols-rounded">terminal</span> {{.T.TabTerminal}}
-        </button>
-        <button class="tab-btn" onclick="switchTab('logs-tab', this)">
-            <span class="material-symbols-rounded">description</span> {{.T.TabLogs}}
-        </button>
-        <button class="tab-btn" onclick="switchTab('settings-tab', this)">
-            <span class="material-symbols-rounded">settings</span> {{.T.TabSettings}}
-        </button>
-    </div>
-
-    <!-- TERMINAL SEKMESİ -->
-    <div id="terminal-tab" class="tab-content active">
-        <div id="omniHealthCard" class="health-card" style="display:none">
-            <div class="health-header">
-                <div class="health-title"><span class="material-symbols-rounded" id="healthIcon">hub</span> <span id="healthTitle">OmniRoute Durumu</span></div>
-                <span id="healthBadge" class="health-badge">...</span>
-            </div>
-            <div id="healthBody" class="health-body"></div>
-            <div id="healthMeta" class="health-meta"></div>
-            <div id="healthActions" class="health-actions"></div>
-        </div>
-        <div class="controls">
-            <button id="btnStart" class="action-btn btn-start" onclick="sendCommand('start')">
-                <span class="material-symbols-rounded">play_arrow</span> {{.T.BtnStart}}
-            </button>
-            <button id="btnStop" class="action-btn btn-stop" onclick="sendCommand('stop')" disabled>
-                <span class="material-symbols-rounded">stop</span> {{.T.BtnStop}}
-            </button>
-            <button id="btnRestart" class="action-btn btn-restart" onclick="sendCommand('restart')" disabled>
-                <span class="material-symbols-rounded">refresh</span> {{.T.BtnRestart}}
-            </button>
-            
-            <div style="flex-grow: 1;"></div>
-            
-            <button id="btnOpenOmni" class="action-btn btn-omni" onclick="window.open('http://localhost:20128', '_blank')" disabled>
-                <span class="material-symbols-rounded">open_in_new</span> {{.T.BtnOpenOmni}}
-            </button>
-        </div>
-        <div id="terminal"></div>
-    </div>
-
-    <!-- LOGLAR SEKMESİ -->
-    <div id="logs-tab" class="tab-content">
-        <div id="server-logs" style="font-family: Consolas, monospace; font-size: 13px; color: var(--md-sys-color-logs-fg); overflow-y: auto; white-space: pre-wrap;">{{.T.Loading}}</div>
-    </div>
-
-    <!-- AYARLAR SEKMESİ -->
-    <div id="settings-tab" class="tab-content">
-        <div class="settings-row">
-            <div>
-                <strong style="font-size: 14px; font-weight: 500;">{{.T.SettingAutoStart}}</strong>
-                <div style="font-size: 12px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">{{.T.SettingAutoStartDesc}}</div>
-            </div>
-            <label class="toggle-switch">
-                <input type="checkbox" id="autoStartToggle" onchange="toggleAutoStart()">
-                <span class="slider"></span>
-            </label>
-        </div>
-
-        <div class="settings-row">
-            <div>
-                <strong style="font-size: 14px; font-weight: 500;">{{.T.SettingLang}}</strong>
-                <div style="font-size: 12px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">{{.T.SettingLangDesc}}</div>
-            </div>
-            
-            <div class="custom-dropdown" id="langDropdown">
-                <div class="dropdown-select" onclick="toggleDropdown()">
-                    <div class="dropdown-selected-value">
-                        <img id="selectedFlag" src="https://flagcdn.com/w40/tr.png" alt="Flag">
-                        <span id="selectedText">Türkçe</span>
-                    </div>
-                    <span class="material-symbols-rounded arrow">expand_more</span>
-                </div>
-                <div class="dropdown-options" id="dropdownOptions">
-                    <div class="dropdown-option" onclick="changeLanguage('tr', 'Türkçe', 'tr')">
-                        <img src="https://flagcdn.com/w40/tr.png" alt="TR"> Türkçe
-                    </div>
-                    <div class="dropdown-option" onclick="changeLanguage('en', 'English', 'gb')">
-                        <img src="https://flagcdn.com/w40/gb.png" alt="EN"> English
-                    </div>
-                    <div class="dropdown-option" onclick="changeLanguage('es', 'Español', 'es')">
-                        <img src="https://flagcdn.com/w40/es.png" alt="ES"> Español
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="settings-row">
-            <div>
-                <strong style="font-size: 14px; font-weight: 500;">{{.T.SettingTheme}}</strong>
-                <div style="font-size: 12px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">{{.T.SettingThemeDesc}}</div>
-            </div>
-            <div class="theme-selector" id="themeSelector">
-                <button class="theme-option" data-theme="light" onclick="setTheme('light')">
-                    <span class="material-symbols-rounded">light_mode</span> {{.T.ThemeLight}}
-                </button>
-                <button class="theme-option" data-theme="dark" onclick="setTheme('dark')">
-                    <span class="material-symbols-rounded">dark_mode</span> {{.T.ThemeDark}}
-                </button>
-                <button class="theme-option" data-theme="system" onclick="setTheme('system')">
-                    <span class="material-symbols-rounded">computer</span> {{.T.ThemeSystem}}
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
-<script>
-    function switchTab(tabId, btn) {
-        document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-        document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-        document.getElementById(tabId).classList.add('active');
-        btn.classList.add('active');
-        if (tabId === 'terminal-tab') {
-            setTimeout(() => fitAddon.fit(), 50);
-        } else if (tabId === 'logs-tab') {
-            fetchFileLogs();
-        }
-    }
-
-    const term = new Terminal({
-        theme: { background: '#0b0d10', foreground: '#e2e2e6' },
-        fontFamily: 'Consolas, "Courier New", monospace',
-        fontSize: 13, cursorBlink: true, convertEol: true
-    });
-    const fitAddon = new FitAddon.FitAddon();
-    term.loadAddon(fitAddon);
-    term.open(document.getElementById('terminal'));
-    setTimeout(() => fitAddon.fit(), 100);
-    window.addEventListener('resize', () => fitAddon.fit());
-
-    const statusBadge = document.getElementById('statusBadge');
-    const statusText = document.getElementById('statusText');
-    const btnStart = document.getElementById('btnStart');
-    const btnStop = document.getElementById('btnStop');
-    const btnRestart = document.getElementById('btnRestart');
-    const btnOpenOmni = document.getElementById('btnOpenOmni');
-    const autoStartToggle = document.getElementById('autoStartToggle');
-    const serverLogsBox = document.getElementById('server-logs');
-    const healthCard = document.getElementById('omniHealthCard');
-    const healthBadge = document.getElementById('healthBadge');
-    const healthBody = document.getElementById('healthBody');
-    const healthMeta = document.getElementById('healthMeta');
-    const healthActions = document.getElementById('healthActions');
-    const healthIcon = document.getElementById('healthIcon');
-
-    const txtClosed = "{{.T.StatusClosed}}";
-    const txtActive = "{{.T.StatusActive}}";
-
-    // --- Theme management ---
-    let currentTheme = "{{.Theme}}";
-    const themeLink = document.getElementById('theme-variables');
-
-    function getEffectiveTheme(theme) {
-        if (theme === 'system') {
-            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        }
-        return theme;
-    }
-
-    function applyTheme(theme) {
-        currentTheme = theme;
-        const effective = getEffectiveTheme(theme);
-        if (themeLink) {
-            themeLink.href = '/themes/' + effective + '/variables.css';
-        }
-        document.querySelectorAll('.theme-option').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.theme === theme);
-        });
-    }
-
-    async function setTheme(theme) {
-        applyTheme(theme);
-        try {
-            await fetch('/api/theme', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ theme })
-            });
-        } catch(e) {}
-    }
-
-    async function loadTheme() {
-        try {
-            const res = await fetch('/api/theme');
-            const data = await res.json();
-            if (data.theme && ['light','dark','system'].includes(data.theme)) {
-                applyTheme(data.theme);
-            } else {
-                applyTheme(currentTheme || 'system');
-            }
-        } catch(e) {
-            applyTheme(currentTheme || 'system');
-        }
-    }
-
-    // Listen for OS theme changes when in system mode
-    try {
-        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-            if (currentTheme === 'system') {
-                applyTheme('system');
-            }
-        });
-    } catch(e) {
-        // Safari fallback
-        try { window.matchMedia('(prefers-color-scheme: dark)').addListener(() => { if(currentTheme==='system') applyTheme('system'); }); } catch(_){}
-    }
-
-    // Initialize theme immediately
-    applyTheme(currentTheme || 'system');
-
-    // --- OmniRoute health ---
-    async function loadOmniHealth() {
-        try {
-            const res = await fetch('/api/omni/health');
-            const h = await res.json();
-            renderHealth(h);
-        } catch(e) {
-            if (healthCard) { healthCard.style.display='none'; }
-        }
-    }
-    function renderHealth(h) {
-        if (!healthCard || !h) return;
-        window.lastHealth = h;
-        healthCard.style.display = 'flex';
-        const isEn = "{{.Lang}}" === "en";
-        let badgeText = h.status, badgeCls = "error", icon = "warning";
-        if (h.status === "running") { badgeText = isEn ? "Running" : "Çalışıyor"; badgeCls = "ok"; icon = "check_circle"; }
-        else if (h.status === "stopped") { badgeText = isEn ? "Stopped" : "Durdu"; badgeCls = "warn"; icon = "pause_circle"; }
-        else if (h.status === "not_installed") { badgeText = isEn ? "Not installed" : "Kurulu değil"; badgeCls = "error"; icon = "cloud_off"; }
-        else if (h.status === "port_conflict") { badgeText = isEn ? "Port conflict" : "Port çakışması"; badgeCls = "error"; icon = "error"; }
-        else if (h.status === "corrupt") { badgeText = isEn ? "Corrupt" : "Bozuk"; badgeCls = "error"; icon = "broken_image"; }
-        else if (h.status === "installing") { badgeText = isEn ? "Installing" : "Kuruluyor"; badgeCls = "warn"; icon = "hourglass_top"; }
-        healthBadge.textContent = badgeText;
-        healthBadge.className = "health-badge " + badgeCls;
-        healthIcon.textContent = icon;
-
-        let body = h.message || "";
-        if (h.installed && h.version) {
-            body += (isEn ? "<br><small>Installed:</small> <strong>" : "<br><small>Kurulu:</small> <strong>") + h.version + "</strong> <small>(" + h.path + "</small>)";
-            if (h.latest) body += " → <strong>" + h.latest + "</strong>";
-            if (h.updateAvailable) body += isEn ? " <span style='color:var(--color-warning)'>update available</span>" : " <span style='color:var(--color-warning)'>güncelleme var</span>";
-        }
-        if (!h.nodeOk) {
-            body += "<br>Node: " + (h.nodeVersion || "bulunamadı") + (isEn ? " (<strong>Node 22+ required</strong>)" : " (<strong>Node 22+ gerekli</strong>)");
-        } else if (h.nodeVersion) {
-            body += "<br>Node " + h.nodeVersion;
-        }
-        healthBody.innerHTML = body;
-
-        let meta = "";
-        if (h.installed) meta += '<span><span class="material-symbols-rounded" style="font-size:14px">folder</span>' + h.path + '</span>';
-        meta += '<span><span class="material-symbols-rounded" style="font-size:14px">lan</span>:' + (h.portFree ? (isEn?"free":"serbest") : (isEn?"occupied":"dolu")) + ' 20128</span>';
-        if (h.health) meta += '<span>health: ' + h.health + '</span>';
-        healthMeta.innerHTML = meta;
-
-        let acts = "";
-        const busy = healthActions.dataset.busy === "1";
-        if (!h.installed) {
-            acts += '<button class="btn-health primary" '+(busy?"disabled":"")+' onclick="doOmniAction(\'install\')"><span class="material-symbols-rounded">download</span> '+(isEn?"Start OmniRoute Install":"OmniRoute Kurulumunu Şimdi Başlat")+'</button>';
-        } else if (h.updateAvailable) {
-            acts += '<button class="btn-health warning" '+(busy?"disabled":"")+' onclick="doOmniAction(\'update\')"><span class="material-symbols-rounded">system_update</span> '+(isEn?"Update OmniRoute":"OmniRoute\'u Güncelle")+'</button>';
-            acts += '<button class="btn-health ghost" '+(busy?"disabled":"")+' onclick="doOmniAction(\'reinstall\')"><span class="material-symbols-rounded">restart_alt</span> '+(isEn?"Reinstall":"Yeniden Kur")+'</button>';
-        } else if (h.health==="port_conflict" || h.status==="corrupt") {
-            acts += '<button class="btn-health warning" '+(busy?"disabled":"")+' onclick="doOmniAction(\'repair\')"><span class="material-symbols-rounded">build</span> '+(isEn?"Repair OmniRoute":"OmniRoute\'u Onar")+'</button>';
-            acts += '<button class="btn-health ghost" '+(busy?"disabled":"")+' onclick="doOmniAction(\'reinstall\')"><span class="material-symbols-rounded">restart_alt</span> '+(isEn?"Reinstall":"Yeniden Kur")+'</button>';
-        } else if (h.status==="stopped") {
-            acts += '<button class="btn-health ghost" '+(busy?"disabled":"")+' onclick="doOmniAction(\'reinstall\')"><span class="material-symbols-rounded">restart_alt</span> '+(isEn?"Reinstall":"Yeniden Kur")+'</button>';
-        } else {
-            // running and up to date
-            acts += '<button class="btn-health ghost" '+(busy?"disabled":"")+' onclick="doOmniAction(\'reinstall\')"><span class="material-symbols-rounded">restart_alt</span> '+(isEn?"Reinstall":"Yeniden Kur")+'</button>';
-        }
-        healthActions.innerHTML = acts;
-        // Disable main controls when not installed or installing
-        const shouldDisableControls = !h.installed || h.opRunning || h.status === 'installing' || h.status === 'not_installed' || h.health === 'installing';
-        [btnStart, btnStop, btnRestart, btnOpenOmni].forEach(btn => {
-            if (shouldDisableControls) {
-                btn.disabled = true;
-                btn.setAttribute('title', h.message);
-            } else {
-                btn.removeAttribute('title');
-            }
-        });
-        if (!shouldDisableControls) checkStatus();
-    }
-    async function doOmniAction(action) {
-        const btns = healthActions.querySelectorAll('button');
-        btns.forEach(b=>b.disabled=true);
-        healthActions.dataset.busy="1";
-        term.write('\r\n\x1b[38;2;99;102;241m> OmniRoute '+action+' başlatılıyor...\x1b[0m\r\n');
-        // switch to terminal tab
-        const termBtn = document.querySelector('.tab-btn');
-        // ensure terminal visible
-        document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
-        document.getElementById('terminal-tab').classList.add('active');
-        document.querySelectorAll('.tab-btn').forEach((el,i)=>{ el.classList.toggle('active', i===0); });
-        setTimeout(()=>fitAddon.fit(),50);
-        try {
-            const res = await fetch('/api/omni/'+action, {method:'POST'});
-            const j = await res.json().catch(()=>({}));
-            if (!res.ok) {
-                term.write('\x1b[31mHata: '+ (j.error || res.statusText) +'\x1b[0m\r\n');
-                if (j.error && j.error.includes('Node')) term.write('Node.js 22+ kurun: https://nodejs.org/\r\n');
-            } else {
-                term.write('\x1b[32mİşlem başlatıldı: '+action+'\x1b[0m\r\n');
-                term.write('Loglar aşağı akacak, health 3s içinde güncellenecek...\r\n');
-            }
-        } catch(e) {
-            term.write('\x1b[31mİstek hatası: '+e+'\x1b[0m\r\n');
-        }
-        // re-enable after 3s and refresh health
-        setTimeout(async()=>{ healthActions.dataset.busy="0"; await loadOmniHealth(); }, 3000);
-    }
-
-    function updateUI(isRunning) {
-        const h = window.lastHealth;
-        const block = h && (!h.installed || h.opRunning || h.status === 'installing' || h.status === 'not_installed' || h.health === 'installing');
-        if (block) {
-            statusText.textContent = h ? h.message : txtClosed;
-            statusBadge.classList.remove("active");
-            statusBadge.querySelector('.material-symbols-rounded').textContent = "cloud_off";
-            btnStart.disabled = true; btnStop.disabled = true; btnRestart.disabled = true; btnOpenOmni.disabled = true;
-            return;
-        }
-        if (isRunning) {
-            statusText.textContent = txtActive;
-            statusBadge.classList.add("active");
-            statusBadge.querySelector('.material-symbols-rounded').textContent = "radio_button_checked";
-            btnStart.disabled = true; btnStop.disabled = false; btnRestart.disabled = false;
-            btnOpenOmni.disabled = false;
-        } else {
-            statusText.textContent = txtClosed;
-            statusBadge.classList.remove("active");
-            statusBadge.querySelector('.material-symbols-rounded').textContent = "radio_button_unchecked";
-            btnStart.disabled = false; btnStop.disabled = true; btnRestart.disabled = true;
-            btnOpenOmni.disabled = true;
-        }
-    }
-
-    async function sendCommand(cmd) {
-        await fetch('/api/' + cmd, { method: 'POST' });
-        checkStatus();
-    }
-
-    async function checkStatus() {
-        const res = await fetch('/api/status');
-        const data = await res.json();
-        updateUI(data.isRunning);
-    }
-
-    async function checkAutoStart() {
-        const res = await fetch('/api/autostart');
-        const data = await res.json();
-        autoStartToggle.checked = data.isEnabled;
-    }
-
-    async function toggleAutoStart() {
-        const isEnabled = autoStartToggle.checked;
-        await fetch('/api/autostart', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ isEnabled })
-        });
-    }
-
-    function toggleDropdown() {
-        document.getElementById('langDropdown').classList.toggle('active');
-        document.getElementById('dropdownOptions').classList.toggle('open');
-    }
-
-    window.addEventListener('click', function(e) {
-        if (!document.getElementById('langDropdown').contains(e.target)) {
-            document.getElementById('langDropdown').classList.remove('active');
-            document.getElementById('dropdownOptions').classList.remove('open');
-        }
-    });
-
-    async function loadSettings() {
-        const res = await fetch('/api/language');
-        const data = await res.json();
-        if(data.language) {
-            setDropdownUI(data.language);
-        }
-    }
-
-    function setDropdownUI(lang) {
-        let text = 'Türkçe';
-        let flag = 'tr';
-        if(lang === 'en') { text = 'English'; flag = 'gb'; }
-        if(lang === 'es') { text = 'Español'; flag = 'es'; }
-        
-        document.getElementById('selectedText').textContent = text;
-        document.getElementById('selectedFlag').src = "https://flagcdn.com/w40/" + flag + ".png";
-    }
-
-    async function changeLanguage(lang, text, flag) {
-        setDropdownUI(lang);
-        document.getElementById('langDropdown').classList.remove('active');
-        document.getElementById('dropdownOptions').classList.remove('open');
-        
-        await fetch('/api/language', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ language: lang })
-        });
-        location.reload();
-    }
-
-    async function fetchFileLogs() {
-        try {
-            const res = await fetch('/api/file-logs');
-            const text = await res.text();
-            serverLogsBox.textContent = text;
-            serverLogsBox.scrollTop = serverLogsBox.scrollHeight;
-        } catch(e) {}
-    }
-
-    let lastLogIndex = 0;
-    async function fetchLogs() {
-        try {
-            const res = await fetch('/api/logs?last=' + lastLogIndex);
-            const data = await res.json();
-            if (data.logs && data.logs.length > 0) {
-                data.logs.forEach(line => term.write(line + '\r\n'));
-                lastLogIndex = data.newIndex;
-            }
-        } catch(e) {}
-    }
-
-    checkStatus();
-    checkAutoStart();
-    loadSettings();
-    loadTheme();
-    loadOmniHealth();
-    setInterval(checkStatus, 3000);
-    setInterval(fetchLogs, 1000);
-    setInterval(loadOmniHealth, 8000);
-    if (document.getElementById('logs-tab').classList.contains('active')) {
-        setInterval(fetchFileLogs, 3000);
-    }
-    
-    term.write('\x1b[38;2;181;204;140m{{.T.TerminalReady}}\x1b[0m\r\n\r\n');
-</script>
-</body>
-</html>
-`
 
 func initFileLog() {
 	var err error
@@ -1134,6 +537,10 @@ func startWebServer() {
 
 	http.Handle("/themes/", http.StripPrefix("/themes/", http.FileServer(http.Dir(getThemesDir()))))
 
+	// web static (js/css) - use ReadFile fallback approach
+	staticFS, _ := fs.Sub(webFS, "web/static")
+	http.Handle("/web/static/", http.StripPrefix("/web/static/", http.FileServer(http.FS(staticFS))))
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -1141,12 +548,15 @@ func startWebServer() {
 		}
 		cfg := loadConfig()
 		t := loadTranslations(cfg.Language)
+		tJson, _ := json.Marshal(t)
 		data := map[string]interface{}{
 			"Lang":  cfg.Language,
 			"Theme": cfg.Theme,
 			"T":     t,
+			"TJson": template.JS(tJson),
 		}
-		tmpl := template.Must(template.New("index").Parse(htmlTemplate))
+		tmplData, _ := fs.ReadFile(webFS, "web/templates/index.html")
+		tmpl := template.Must(template.New("index").Parse(string(tmplData)))
 		tmpl.Execute(w, data)
 	})
 
