@@ -178,7 +178,7 @@ const htmlTemplate = `
     <title>{{.T.Title}}</title>
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
-    <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,1,0" rel="stylesheet" />
     <link rel="stylesheet" href="/themes/common.css">
     <link id="theme-variables" rel="stylesheet" href="/themes/dark/variables.css">
@@ -198,7 +198,17 @@ const htmlTemplate = `
 
 <div class="container">
     <div class="header">
-        <h1>{{.T.Header}}</h1>
+        <div class="header-left">
+            <div class="traffic" aria-hidden="true">
+                <span class="dot red"></span>
+                <span class="dot yellow"></span>
+                <span class="dot green"></span>
+            </div>
+            <div class="brand">
+                <div class="brand-icon"><span class="material-symbols-rounded">route</span></div>
+                <h1>{{.T.Header}}</h1>
+            </div>
+        </div>
         <div id="statusBadge" class="status-badge">
             <span class="material-symbols-rounded">radio_button_unchecked</span>
             <span id="statusText">{{.T.StatusClosed}}</span>
