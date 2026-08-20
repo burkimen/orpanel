@@ -1,0 +1,17 @@
+# mise (ex-rtx) — orpanel tek komut kurulum
+# Kullanim:
+#   mise use -g npm:orpanel          # npm registry uzerinden (Node gerek)
+#   mise use -g ubi:burkimen/orpanel # GitHub Releases'ten direkt (npm'siz)
+#   mise use -g orpanel@1.0.0        # bu repo local ise
+
+[tools]
+# npm backend — orpanel npm paketini kurar (bun da ayni)
+"npm:orpanel" = "latest"
+
+# ubi backend — GitHub Releases'ten binary indirir (npm'siz, en standart)
+# mise ubi plugin'i otomatik asset secer: orpanel-v{version}-{os}-{arch}.tar.gz
+# Elle: mise use -g ubi:burkimen/orpanel@1.0.0
+# Dokuman: https://mise.jdx.dev/registry.html
+
+[settings]
+# orpanel binary calistiktan sonra config XDG'ye yazilir, mise env'i bozmaz

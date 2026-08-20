@@ -370,6 +370,15 @@ const htmlTemplate = `
 
     <!-- TERMINAL SEKMESİ -->
     <div id="terminal-tab" class="tab-content active">
+        <div id="omniHealthCard" class="health-card" style="display:none">
+            <div class="health-header">
+                <div class="health-title"><span class="material-symbols-rounded" id="healthIcon">hub</span> <span id="healthTitle">OmniRoute Durumu</span></div>
+                <span id="healthBadge" class="health-badge">...</span>
+            </div>
+            <div id="healthBody" class="health-body"></div>
+            <div id="healthMeta" class="health-meta"></div>
+            <div id="healthActions" class="health-actions"></div>
+        </div>
         <div class="controls">
             <button id="btnStart" class="action-btn btn-start" onclick="sendCommand('start')">
                 <span class="material-symbols-rounded">play_arrow</span> {{.T.BtnStart}}
@@ -490,6 +499,12 @@ const htmlTemplate = `
     const btnOpenOmni = document.getElementById('btnOpenOmni');
     const autoStartToggle = document.getElementById('autoStartToggle');
     const serverLogsBox = document.getElementById('server-logs');
+    const healthCard = document.getElementById('omniHealthCard');
+    const healthBadge = document.getElementById('healthBadge');
+    const healthBody = document.getElementById('healthBody');
+    const healthMeta = document.getElementById('healthMeta');
+    const healthActions = document.getElementById('healthActions');
+    const healthIcon = document.getElementById('healthIcon');
 
     const txtClosed = "{{.T.StatusClosed}}";
     const txtActive = "{{.T.StatusActive}}";
@@ -555,6 +570,96 @@ const htmlTemplate = `
 
     // Initialize theme immediately
     applyTheme(currentTheme || 'system');
+
+    // --- OmniRoute health ---
+    async function loadOmniHealth() {
+        try {
+            const res = await fetch('/api/omni/health');
+            const h = await res.json();
+            renderHealth(h);
+        } catch(e) {
+            if (healthCard) { healthCard.style.display='none'; }
+        }
+    }
+    function renderHealth(h) {
+        if (!healthCard || !h) return;
+        healthCard.style.display = 'flex';
+        const isEn = "{{.Lang}}" === "en";
+        let badgeText = h.status, badgeCls = "error", icon = "warning";
+        if (h.status === "running") { badgeText = isEn ? "Running" : "Çalışıyor"; badgeCls = "ok"; icon = "check_circle"; }
+        else if (h.status === "stopped") { badgeText = isEn ? "Stopped" : "Durdu"; badgeCls = "warn"; icon = "pause_circle"; }
+        else if (h.status === "not_installed") { badgeText = isEn ? "Not installed" : "Kurulu değil"; badgeCls = "error"; icon = "cloud_off"; }
+        else if (h.status === "port_conflict") { badgeText = isEn ? "Port conflict" : "Port çakışması"; badgeCls = "error"; icon = "error"; }
+        else if (h.status === "corrupt") { badgeText = isEn ? "Corrupt" : "Bozuk"; badgeCls = "error"; icon = "broken_image"; }
+        healthBadge.textContent = badgeText;
+        healthBadge.className = "health-badge " + badgeCls;
+        healthIcon.textContent = icon;
+
+        let body = h.message || "";
+        if (h.installed && h.version) {
+            body += (isEn ? "<br><small>Installed:</small> <strong>" : "<br><small>Kurulu:</small> <strong>") + h.version + "</strong> <small>(" + h.path + "</small>)";
+            if (h.latest) body += " → <strong>" + h.latest + "</strong>";
+            if (h.updateAvailable) body += isEn ? " <span style='color:var(--color-warning)'>update available</span>" : " <span style='color:var(--color-warning)'>güncelleme var</span>";
+        }
+        if (!h.nodeOk) {
+            body += "<br>Node: " + (h.nodeVersion || "bulunamadı") + (isEn ? " (<strong>Node 22+ required</strong>)" : " (<strong>Node 22+ gerekli</strong>)");
+        } else if (h.nodeVersion) {
+            body += "<br>Node " + h.nodeVersion;
+        }
+        healthBody.innerHTML = body;
+
+        let meta = "";
+        if (h.installed) meta += '<span><span class="material-symbols-rounded" style="font-size:14px">folder</span>' + h.path + '</span>';
+        meta += '<span><span class="material-symbols-rounded" style="font-size:14px">lan</span>:' + (h.portFree ? (isEn?"free":"serbest") : (isEn?"occupied":"dolu")) + ' 20128</span>';
+        if (h.health) meta += '<span>health: ' + h.health + '</span>';
+        healthMeta.innerHTML = meta;
+
+        let acts = "";
+        const busy = healthActions.dataset.busy === "1";
+        if (!h.installed) {
+            acts += '<button class="btn-health primary" '+(busy?"disabled":"")+' onclick="doOmniAction(\'install\')"><span class="material-symbols-rounded">download</span> '+(isEn?"Start OmniRoute Install":"OmniRoute Kurulumunu Şimdi Başlat")+'</button>';
+        } else if (h.updateAvailable) {
+            acts += '<button class="btn-health warning" '+(busy?"disabled":"")+' onclick="doOmniAction(\'update\')"><span class="material-symbols-rounded">system_update</span> '+(isEn?"Update OmniRoute":"OmniRoute\'u Güncelle")+'</button>';
+            acts += '<button class="btn-health ghost" '+(busy?"disabled":"")+' onclick="doOmniAction(\'reinstall\')"><span class="material-symbols-rounded">restart_alt</span> '+(isEn?"Reinstall":"Yeniden Kur")+'</button>';
+        } else if (h.health==="port_conflict" || h.status==="corrupt") {
+            acts += '<button class="btn-health warning" '+(busy?"disabled":"")+' onclick="doOmniAction(\'repair\')"><span class="material-symbols-rounded">build</span> '+(isEn?"Repair OmniRoute":"OmniRoute\'u Onar")+'</button>';
+            acts += '<button class="btn-health ghost" '+(busy?"disabled":"")+' onclick="doOmniAction(\'reinstall\')"><span class="material-symbols-rounded">restart_alt</span> '+(isEn?"Reinstall":"Yeniden Kur")+'</button>';
+        } else if (h.status==="stopped") {
+            acts += '<button class="btn-health ghost" '+(busy?"disabled":"")+' onclick="doOmniAction(\'reinstall\')"><span class="material-symbols-rounded">restart_alt</span> '+(isEn?"Reinstall":"Yeniden Kur")+'</button>';
+        } else {
+            // running and up to date
+            acts += '<button class="btn-health ghost" '+(busy?"disabled":"")+' onclick="doOmniAction(\'reinstall\')"><span class="material-symbols-rounded">restart_alt</span> '+(isEn?"Reinstall":"Yeniden Kur")+'</button>';
+        }
+        healthActions.innerHTML = acts;
+    }
+    async function doOmniAction(action) {
+        const btns = healthActions.querySelectorAll('button');
+        btns.forEach(b=>b.disabled=true);
+        healthActions.dataset.busy="1";
+        term.write('\r\n\x1b[38;2;99;102;241m> OmniRoute '+action+' başlatılıyor...\x1b[0m\r\n');
+        // switch to terminal tab
+        const termBtn = document.querySelector('.tab-btn');
+        // ensure terminal visible
+        document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
+        document.getElementById('terminal-tab').classList.add('active');
+        document.querySelectorAll('.tab-btn').forEach((el,i)=>{ el.classList.toggle('active', i===0); });
+        setTimeout(()=>fitAddon.fit(),50);
+        try {
+            const res = await fetch('/api/omni/'+action, {method:'POST'});
+            const j = await res.json().catch(()=>({}));
+            if (!res.ok) {
+                term.write('\x1b[31mHata: '+ (j.error || res.statusText) +'\x1b[0m\r\n');
+                if (j.error && j.error.includes('Node')) term.write('Node.js 22+ kurun: https://nodejs.org/\r\n');
+            } else {
+                term.write('\x1b[32mİşlem başlatıldı: '+action+'\x1b[0m\r\n');
+                term.write('Loglar aşağı akacak, health 3s içinde güncellenecek...\r\n');
+            }
+        } catch(e) {
+            term.write('\x1b[31mİstek hatası: '+e+'\x1b[0m\r\n');
+        }
+        // re-enable after 3s and refresh health
+        setTimeout(async()=>{ healthActions.dataset.busy="0"; await loadOmniHealth(); }, 3000);
+    }
 
     function updateUI(isRunning) {
         if (isRunning) {
@@ -666,8 +771,10 @@ const htmlTemplate = `
     checkAutoStart();
     loadSettings();
     loadTheme();
+    loadOmniHealth();
     setInterval(checkStatus, 3000);
     setInterval(fetchLogs, 1000);
+    setInterval(loadOmniHealth, 8000);
     if (document.getElementById('logs-tab').classList.contains('active')) {
         setInterval(fetchFileLogs, 3000);
     }
@@ -1060,6 +1167,13 @@ func startWebServer() {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(ThemeResponse{Theme: cfg.Theme})
 	})
+
+	// OmniRoute health & ops
+	http.HandleFunc("/api/omni/health", handleOmniHealth)
+	http.HandleFunc("/api/omni/install", handleOmniInstall)
+	http.HandleFunc("/api/omni/update", handleOmniUpdate)
+	http.HandleFunc("/api/omni/repair", handleOmniRepair)
+	http.HandleFunc("/api/omni/reinstall", handleOmniReinstall)
 
 	http.HandleFunc("/api/logs", func(w http.ResponseWriter, r *http.Request) {
 		lastStr := r.URL.Query().Get("last")

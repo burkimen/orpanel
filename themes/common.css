@@ -286,3 +286,71 @@ input:checked + .slider:before { transform: translateX(20px); background: #fff; 
     box-shadow: 0 1px 2px #00000008;
 }
 .theme-option .material-symbols-rounded { font-size: 16px; }
+
+/* OmniRoute health card */
+.health-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-shadow: var(--shadow-soft);
+}
+.health-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+.health-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 14px;
+}
+.health-badge {
+    padding: 4px 10px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    border: 1px solid transparent;
+}
+.health-badge.ok { background: color-mix(in oklab, var(--color-success) 14%, var(--color-surface)); color: var(--color-success); border-color: color-mix(in oklab, var(--color-success) 20%, transparent); }
+.health-badge.warn { background: color-mix(in oklab, var(--color-warning) 14%, var(--color-surface)); color: #b45309; border-color: color-mix(in oklab, var(--color-warning) 25%, transparent); }
+.health-badge.error { background: color-mix(in oklab, var(--color-error) 14%, var(--color-surface)); color: var(--color-error); border-color: color-mix(in oklab, var(--color-error) 20%, transparent); }
+.health-body { font-size: 13px; color: var(--color-text-muted); line-height: 1.5; }
+.health-body strong { color: var(--color-text-main); }
+.health-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--color-text-muted); }
+.health-meta span { display: flex; align-items: center; gap: 4px; }
+.health-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn-health {
+    height: 36px;
+    padding: 0 14px;
+    border-radius: var(--radius-control);
+    font-weight: 600;
+    font-size: 13px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: all 0.2s;
+    font-family: inherit;
+}
+.btn-health:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-health.primary { background: var(--color-primary); color:#fff; box-shadow: 0 1px 2px #00000010; }
+.btn-health.primary:hover:not(:disabled) { background: var(--color-primary-hover); }
+.btn-health.accent { background: var(--color-accent); color:#fff; }
+.btn-health.accent:hover:not(:disabled) { background: var(--color-accent-hover); }
+.btn-health.warning { background: var(--color-warning); color:#fff; }
+.btn-health.warning:hover:not(:disabled) { background: color-mix(in oklab, var(--color-warning) 88%, black); }
+.btn-health.ghost { background: var(--color-surface); color: var(--color-text-main); border-color: var(--color-border); }
+.btn-health.ghost:hover:not(:disabled) { background: var(--surface-2); }
+.btn-health .material-symbols-rounded { font-size: 16px; }

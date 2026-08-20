@@ -1,0 +1,38 @@
+{
+  "name": "orpanel",
+  "version": "1.0.0",
+  "description": "OmniRoute için çapraz platform masaüstü kontrol paneli — sistem tepsisi, yerleşik terminal, tema ve sağlık kontrolü",
+  "type": "commonjs",
+  "bin": {
+    "orpanel": "bin/orpanel.js",
+    "orpanel-gui": "bin/orpanel.js"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "themes/",
+    "locales/",
+    "app.ico",
+    "icon.png",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "postinstall": "node bin/postinstall.js",
+    "test": "echo \"no test\" && exit 0"
+  },
+  "keywords": ["omniroute", "orpanel", "ai", "router", "tray", "panel", "go"],
+  "author": "burkimen <mburaksaglik@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/burkimen/orpanel.git"
+  },
+  "homepage": "https://github.com/burkimen/orpanel#readme",
+  "engines": {
+    "node": ">=18"
+  },
+  "os": ["win32", "darwin", "linux"],
+  "cpu": ["x64", "arm64"],
+  "preferGlobal": true
+}
