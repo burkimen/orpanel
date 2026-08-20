@@ -1,25 +1,62 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"net/http"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
-	"path/filepath"
 )
 
 var (
-	omniOpMu        sync.Mutex
-	omniOpRunning   bool
+	omniOpMu      sync.Mutex
+	omniOpRunning bool
 )
 
 func isOmniOpRunning() bool {
 	omniOpMu.Lock()
 	defer omniOpMu.Unlock()
 	return omniOpRunning
+}
+
+func streamCmd(name string, args []string) error {
+	cmd := exec.Command(name, args...)
+	hideWindow(cmd)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			writeLog("[NPM] %s", scanner.Text())
+		}
+	}()
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			writeLog("[NPM] %s", scanner.Text())
+		}
+	}()
+	return cmd.Wait()
+}
+
+func npmCmd(args []string) []string {
+	if runtime.GOOS == "windows" {
+		return append([]string{"/c", "npm"}, args...)
+	}
+	return args
 }
 
 func runNpmOmni(op string, args ...string) {
@@ -38,30 +75,16 @@ func runNpmOmni(op string, args ...string) {
 	}()
 
 	writeLog("INFO: OmniRoute %s başlatılıyor: npm %s", op, strings.Join(args, " "))
-	var cmd *exec.Cmd
+	var err error
 	if runtime.GOOS == "windows" {
-		// use cmd /c npm
-		allArgs := append([]string{"/c", "npm"}, args...)
-		cmd = exec.Command("cmd", allArgs...)
+		err = streamCmd("cmd", npmCmd(args))
 	} else {
-		cmd = exec.Command("npm", args...)
-	}
-	hideWindow(cmd)
-	// stream via writeLog
-	out, err := cmd.CombinedOutput()
-	if len(out) > 0 {
-		for _, line := range strings.Split(string(out), "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" {
-				writeLog("[NPM] %s", line)
-			}
-		}
+		err = streamCmd("npm", args)
 	}
 	if err != nil {
 		writeLog("ERROR: npm %s başarısız: %v", strings.Join(args, " "), err)
 	} else {
 		writeLog("SUCCESS: npm %s tamamlandı", strings.Join(args, " "))
-		// invalidate caches after install/update
 		latestMu.Lock()
 		latestCache = ""
 		latestMu.Unlock()
@@ -70,7 +93,6 @@ func runNpmOmni(op string, args ...string) {
 		OmniroutePath = getOmniroutePathEnhanced()
 		StartArgs = filepath.Join(OmniroutePath, "bin", "omniroute.mjs")
 		writeLog("INFO: OmniRoute yolu yenilendi: %s", OmniroutePath)
-		// auto-start after successful install/update
 		time.Sleep(800 * time.Millisecond)
 		go startOmniroute()
 	}
@@ -139,33 +161,20 @@ func handleOmniReinstall(w http.ResponseWriter, r *http.Request) {
 			omniOpRunning = false
 			omniOpMu.Unlock()
 		}()
+
 		writeLog("INFO: OmniRoute yeniden kurulum: uninstall")
-		var cmd1 *exec.Cmd
 		if runtime.GOOS == "windows" {
-			cmd1 = exec.Command("cmd", "/c", "npm", "uninstall", "-g", "omniroute")
+			streamCmd("cmd", npmCmd([]string{"uninstall", "-g", "omniroute"}))
 		} else {
-			cmd1 = exec.Command("npm", "uninstall", "-g", "omniroute")
+			streamCmd("npm", []string{"uninstall", "-g", "omniroute"})
 		}
-		hideWindow(cmd1)
-		out, _ := cmd1.CombinedOutput()
-		for _, line := range strings.Split(string(out), "\n") {
-			if strings.TrimSpace(line) != "" {
-				writeLog("[NPM] %s", strings.TrimSpace(line))
-			}
-		}
+
 		writeLog("INFO: OmniRoute yeniden kurulum: install")
-		var cmd2 *exec.Cmd
+		var err error
 		if runtime.GOOS == "windows" {
-			cmd2 = exec.Command("cmd", "/c", "npm", "install", "-g", "omniroute@latest")
+			err = streamCmd("cmd", npmCmd([]string{"install", "-g", "omniroute@latest"}))
 		} else {
-			cmd2 = exec.Command("npm", "install", "-g", "omniroute@latest")
-		}
-		hideWindow(cmd2)
-		out2, err := cmd2.CombinedOutput()
-		for _, line := range strings.Split(string(out2), "\n") {
-			if strings.TrimSpace(line) != "" {
-				writeLog("[NPM] %s", strings.TrimSpace(line))
-			}
+			err = streamCmd("npm", []string{"install", "-g", "omniroute@latest"})
 		}
 		if err != nil {
 			writeLog("ERROR: reinstall başarısız: %v", err)
