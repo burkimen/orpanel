@@ -29,9 +29,10 @@
     --color-fd-card: #ffffff;
     --color-fd-border: #00000014;
     --color-fd-primary: #e54d5e;
-    --grid-line: #00000012;
+    --grid-line: #00000014;
     --grid-size: 32px;
     --surface-2: #f5f5fa;
+    --container-bg: transparent;
     --shadow-soft: 0 1px 3px #00000005, 0 4px 12px #00000004;
     --shadow-warm: 0 2px 12px -2px #e54d5e1f;
     --shadow-elevated: 0 12px 28px -4px #1414280f;
