@@ -219,7 +219,9 @@ func killPortHolders(port int) int {
 				if pid < 100 {
 					continue
 				}
-				exec.Command("taskkill", "/F", "/PID", strconv.Itoa(pid)).Run()
+				c := exec.Command("taskkill", "/F", "/PID", strconv.Itoa(pid))
+				hideWindow(c)
+				c.Run()
 				killed++
 			}
 			if killed > 0 {
@@ -227,7 +229,9 @@ func killPortHolders(port int) int {
 			}
 		}
 		// fallback: netstat
-		out2, err := exec.Command("cmd", "/c", fmt.Sprintf("netstat -ano | findstr :%d", port)).Output()
+		cmd2 := exec.Command("cmd", "/c", fmt.Sprintf("netstat -ano | findstr :%d", port))
+		hideWindow(cmd2)
+		out2, err := cmd2.Output()
 		if err == nil {
 			for _, line := range strings.Split(string(out2), "\n") {
 				fields := strings.Fields(line)
@@ -239,7 +243,9 @@ func killPortHolders(port int) int {
 				if err != nil || pid == os.Getpid() || pid < 100 {
 					continue
 				}
-				exec.Command("taskkill", "/F", "/PID", pidStr).Run()
+				c2 := exec.Command("taskkill", "/F", "/PID", pidStr)
+				hideWindow(c2)
+				c2.Run()
 				killed++
 			}
 		}
@@ -274,7 +280,9 @@ func ensurePortFree(port int) bool {
 	if isPortInUse(port) {
 		// second attempt - broader: kill node.exe that may be omniroute
 		if runtime.GOOS == "windows" {
-			exec.Command("taskkill", "/F", "/IM", "node.exe").Run()
+			c := exec.Command("taskkill", "/F", "/IM", "node.exe")
+			hideWindow(c)
+			c.Run()
 			time.Sleep(800 * time.Millisecond)
 		}
 	}
@@ -975,7 +983,9 @@ func stopOmniroute() {
 	if cmd != nil && cmd.Process != nil {
 		pid := cmd.Process.Pid
 		if runtime.GOOS == "windows" {
-			exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid)).Run()
+			c := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid))
+			hideWindow(c)
+			c.Run()
 		} else {
 			cmd.Process.Kill()
 		}
@@ -993,7 +1003,9 @@ func stopOmniroute() {
 		if isPortInUse(OmniPort) {
 			writeLog("WARN: Port %d hâlâ dolu, node.exe zorla kapatılıyor", OmniPort)
 			if runtime.GOOS == "windows" {
-				exec.Command("taskkill", "/F", "/IM", "node.exe").Run()
+				c2 := exec.Command("taskkill", "/F", "/IM", "node.exe")
+				hideWindow(c2)
+				c2.Run()
 				time.Sleep(500 * time.Millisecond)
 			}
 		}

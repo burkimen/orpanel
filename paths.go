@@ -6,9 +6,14 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 var cachedExeDir string
+var cachedNpmPrefix string
+var cachedNpmPrefixTime time.Time
+var cachedOmniPath string
+var cachedOmniPathTime time.Time
 
 func exeDir() string {
 	if cachedExeDir != "" {
@@ -105,8 +110,11 @@ func getIconPath() string {
 	return filepath.Join(exeDir(), "app.ico")
 }
 
-// Enhanced OmniRoute path discovery
+// Enhanced OmniRoute path discovery (cached 30s to avoid frequent npm spawn)
 func getOmniroutePathEnhanced() string {
+	if cachedOmniPath != "" && time.Since(cachedOmniPathTime) < 30*time.Second {
+		return cachedOmniPath
+	}
 	candidates := []string{}
 
 	// 1. Original logic
@@ -140,6 +148,8 @@ func getOmniroutePathEnhanced() string {
 	// Check candidates
 	for _, p := range candidates {
 		if isOmnirouteDir(p) {
+			cachedOmniPath = p
+			cachedOmniPathTime = time.Now()
 			return p
 		}
 		// for nvm base, glob
@@ -147,6 +157,8 @@ func getOmniroutePathEnhanced() string {
 			if matches, _ := filepath.Glob(filepath.Join(p, "*", "lib", "node_modules", "omniroute")); matches != nil {
 				for _, m := range matches {
 					if isOmnirouteDir(m) {
+						cachedOmniPath = m
+						cachedOmniPathTime = time.Now()
 						return m
 					}
 				}
@@ -155,21 +167,31 @@ func getOmniroutePathEnhanced() string {
 	}
 
 	// fallback to original
+	var fallback string
 	if runtime.GOOS == "windows" {
-		return filepath.Join(os.Getenv("APPDATA"), "npm", "node_modules", "omniroute")
+		fallback = filepath.Join(os.Getenv("APPDATA"), "npm", "node_modules", "omniroute")
+	} else {
+		home, _ := os.UserHomeDir()
+		fallback = filepath.Join(home, ".npm", "lib", "node_modules", "omniroute")
 	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".npm", "lib", "node_modules", "omniroute")
+	cachedOmniPath = fallback
+	cachedOmniPathTime = time.Now()
+	return fallback
 }
 
 func getNpmPrefix() string {
-	// timeout quickly
+	if cachedNpmPrefix != "" && time.Since(cachedNpmPrefixTime) < 5*time.Minute {
+		return cachedNpmPrefix
+	}
 	cmd := exec.Command("npm", "prefix", "-g")
+	hideWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	cachedNpmPrefix = strings.TrimSpace(string(out))
+	cachedNpmPrefixTime = time.Now()
+	return cachedNpmPrefix
 }
 
 func isOmnirouteDir(p string) bool {

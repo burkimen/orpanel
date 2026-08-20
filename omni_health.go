@@ -33,13 +33,29 @@ var (
 	latestMu        sync.Mutex
 	omniOpMu        sync.Mutex
 	omniOpRunning   bool
+	nodeCache       string
+	nodeCacheOk     bool
+	nodeCacheTime   time.Time
+	nodeCacheMu     sync.Mutex
 )
 
 func getNodeVersion() (string, bool) {
-	verOut, err := exec.Command("node", "--version").Output()
+	nodeCacheMu.Lock()
+	if nodeCacheTime.After(time.Now().Add(-5 * time.Minute)) && nodeCache != "" {
+		v, ok := nodeCache, nodeCacheOk
+		nodeCacheMu.Unlock()
+		return v, ok
+	}
+	nodeCacheMu.Unlock()
+
+	cmd := exec.Command("node", "--version")
+	hideWindow(cmd)
+	verOut, err := cmd.Output()
 	if err != nil {
 		// try nodejs binary name on some linux
-		verOut, err = exec.Command("nodejs", "--version").Output()
+		cmd2 := exec.Command("nodejs", "--version")
+		hideWindow(cmd2)
+		verOut, err = cmd2.Output()
 		if err != nil {
 			return "", false
 		}
@@ -65,6 +81,11 @@ func getNodeVersion() (string, bool) {
 	} else if major == 22 && len(parts) == 1 {
 		ok = true
 	}
+	nodeCacheMu.Lock()
+	nodeCache = ver
+	nodeCacheOk = ok
+	nodeCacheTime = time.Now()
+	nodeCacheMu.Unlock()
 	return ver, ok
 }
 
@@ -98,6 +119,7 @@ func getOmniLatestVersion() string {
 	} else {
 		cmd = exec.Command("npm", "view", "omniroute", "version")
 	}
+	hideWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		// fallback to cached if any
@@ -239,6 +261,7 @@ func runNpmOmni(op string, args ...string) {
 	} else {
 		cmd = exec.Command("npm", args...)
 	}
+	hideWindow(cmd)
 	// stream via writeLog
 	out, err := cmd.CombinedOutput()
 	if len(out) > 0 {
@@ -330,6 +353,7 @@ func handleOmniReinstall(w http.ResponseWriter, r *http.Request) {
 		} else {
 			cmd1 = exec.Command("npm", "uninstall", "-g", "omniroute")
 		}
+		hideWindow(cmd1)
 		out, _ := cmd1.CombinedOutput()
 		for _, line := range strings.Split(string(out), "\n") {
 			if strings.TrimSpace(line) != "" {
@@ -343,6 +367,7 @@ func handleOmniReinstall(w http.ResponseWriter, r *http.Request) {
 		} else {
 			cmd2 = exec.Command("npm", "install", "-g", "omniroute@latest")
 		}
+		hideWindow(cmd2)
 		out2, err := cmd2.CombinedOutput()
 		for _, line := range strings.Split(string(out2), "\n") {
 			if strings.TrimSpace(line) != "" {
