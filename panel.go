@@ -15,21 +15,15 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"text/template"
 	"time"
 
 	"github.com/getlantern/systray"
-	"golang.org/x/sys/windows/registry"
 )
 
 // --- EVRENSEL VE PLATFORMA DUYARLI YOL YAPILANDIRMASI ---
 func getOmniroutePath() string {
-	if runtime.GOOS == "windows" {
-		return filepath.Join(os.Getenv("APPDATA"), "npm", "node_modules", "omniroute")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".npm", "lib", "node_modules", "omniroute")
+	return getOmniroutePathEnhanced()
 }
 
 var (
@@ -97,7 +91,15 @@ func isValidTheme(t string) bool {
 }
 
 func loadConfigUnlocked() Config {
-	file, err := os.ReadFile(ConfigFileName)
+	// try exeDir first, then cwd for backward compat
+	cfgPath := getConfigPath()
+	file, err := os.ReadFile(cfgPath)
+	if err != nil {
+		// fallback to cwd
+		if cfgPath != ConfigFileName {
+			file, err = os.ReadFile(ConfigFileName)
+		}
+	}
 	if err != nil {
 		return Config{Language: "tr", AutoStart: false, Theme: ThemeSystem}
 	}
@@ -138,7 +140,7 @@ func saveConfig(lang string, autoStart bool) {
 		existing.Theme = ThemeSystem
 	}
 	data, _ := json.MarshalIndent(existing, "", "  ")
-	os.WriteFile(ConfigFileName, data, 0644)
+	os.WriteFile(getConfigPath(), data, 0644)
 }
 
 func saveTheme(theme string) error {
@@ -156,14 +158,15 @@ func saveTheme(theme string) error {
 		cfg.Theme = ThemeSystem
 	}
 	data, _ := json.MarshalIndent(cfg, "", "  ")
-	return os.WriteFile(ConfigFileName, data, 0644)
+	return os.WriteFile(getConfigPath(), data, 0644)
 }
 
 func loadTranslations(lang string) map[string]string {
-	filePath := filepath.Join(LocalesDir, lang+".json")
+	locDir := getLocalesDir()
+	filePath := filepath.Join(locDir, lang+".json")
 	file, err := os.ReadFile(filePath)
 	if err != nil {
-		file, err = os.ReadFile(filepath.Join(LocalesDir, "tr.json"))
+		file, err = os.ReadFile(filepath.Join(locDir, "tr.json"))
 		if err != nil {
 			return map[string]string{
 				"Title": "Omniroute Control Panel",
@@ -177,12 +180,21 @@ func loadTranslations(lang string) map[string]string {
 
 // --- Port helpers (EADDRINUSE fix) ---
 func isPortInUse(port int) bool {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 500*time.Millisecond)
-	if err != nil {
-		return false
+	// try both v4 and v6
+	for _, host := range []string{"127.0.0.1", "::1"} {
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, fmt.Sprintf("%d", port)), 400*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			return true
+		}
 	}
-	conn.Close()
-	return true
+	// also try 0.0.0.0 via net.Listen probe (if dial fails but listen also fails, port is in use)
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return true
+	}
+	ln.Close()
+	return false
 }
 
 func killPortHolders(port int) int {
@@ -191,7 +203,7 @@ func killPortHolders(port int) int {
 		// Prefer PowerShell Get-NetTCPConnection
 		psCmd := fmt.Sprintf("Get-NetTCPConnection -LocalPort %d -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique", port)
 		cmd := exec.Command("powershell", "-NoProfile", "-Command", psCmd)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		hideWindow(cmd)
 		out, err := cmd.Output()
 		if err == nil {
 			for _, line := range strings.Split(string(out), "\n") {
@@ -273,7 +285,8 @@ func rotateLogIfNeeded() {
 	if fileLogWriter == nil {
 		return
 	}
-	info, err := os.Stat(LogFileName)
+	lp := getLogPath()
+	info, err := os.Stat(lp)
 	if err != nil {
 		return
 	}
@@ -282,16 +295,16 @@ func rotateLogIfNeeded() {
 	}
 	fileLogWriter.Close()
 	// keep last 50KB
-	data, err := os.ReadFile(LogFileName)
+	data, err := os.ReadFile(lp)
 	if err == nil && len(data) > 50*1024 {
 		data = data[len(data)-50*1024:]
 		// cut to next newline
 		if idx := strings.Index(string(data), "\n"); idx != -1 {
 			data = data[idx+1:]
 		}
-		os.WriteFile(LogFileName, data, 0644)
+		os.WriteFile(lp, data, 0644)
 	}
-	f, err := os.OpenFile(LogFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	f, err := os.OpenFile(lp, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err == nil {
 		fileLogWriter = f
 	}
@@ -667,20 +680,21 @@ const htmlTemplate = `
 
 func initFileLog() {
 	var err error
+	lp := getLogPath()
 	// rotate if oversized before opening
-	if info, err2 := os.Stat(LogFileName); err2 == nil && info.Size() > logMaxBytes {
-		data, err3 := os.ReadFile(LogFileName)
+	if info, err2 := os.Stat(lp); err2 == nil && info.Size() > logMaxBytes {
+		data, err3 := os.ReadFile(lp)
 		if err3 == nil && len(data) > 50*1024 {
 			cut := data[len(data)-50*1024:]
 			if idx := strings.Index(string(cut), "\n"); idx != -1 {
 				cut = cut[idx+1:]
 			}
-			_ = os.WriteFile(LogFileName, cut, 0644)
+			_ = os.WriteFile(lp, cut, 0644)
 		} else if err3 == nil {
-			_ = os.WriteFile(LogFileName, data, 0644)
+			_ = os.WriteFile(lp, data, 0644)
 		}
 	}
-	fileLogWriter, err = os.OpenFile(LogFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	fileLogWriter, err = os.OpenFile(lp, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 		fmt.Printf("Log dosyası açılamadı: %v\n", err)
 	}
@@ -747,57 +761,6 @@ func writeLog(format string, args ...interface{}) {
 	}
 }
 
-func setAutoStart(enable bool) error {
-	cfg := loadConfig()
-	saveConfig(cfg.Language, enable)
-
-	if runtime.GOOS == "windows" {
-		k, err := registry.OpenKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Run`, registry.ALL_ACCESS)
-		if err != nil {
-			return err
-		}
-		defer k.Close()
-
-		if enable {
-			exePath, _ := os.Executable()
-			return k.SetStringValue(AppName, `"`+exePath+`"`)
-		}
-		return k.DeleteValue(AppName)
-	}
-	return nil
-}
-
-func isAutoStartEnabled() bool {
-	cfg := loadConfig()
-	if runtime.GOOS == "windows" {
-		k, err := registry.OpenKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Run`, registry.QUERY_VALUE)
-		if err != nil {
-			return cfg.AutoStart
-		}
-		defer k.Close()
-		_, _, err = k.GetStringValue(AppName)
-		return err == nil
-	}
-	return cfg.AutoStart
-}
-
-func showConfirmDialog(title, message string) bool {
-	if runtime.GOOS == "windows" {
-		psCommand := fmt.Sprintf(
-			"Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show('%s', '%s', 'YesNo', 'Warning')",
-			message, title,
-		)
-		cmd := exec.Command("powershell", "-NoProfile", "-Command", psCommand)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-		output, err := cmd.Output()
-		if err == nil {
-			res := strings.TrimSpace(string(output))
-			return res == "Yes" || res == "6"
-		}
-	}
-	return true
-}
-
 func startOmniroute() {
 	cmdMutex.Lock()
 	defer cmdMutex.Unlock()
@@ -841,17 +804,13 @@ func startOmniroute() {
 	cmd = exec.Command(StartCommand, StartArgs, "--no-open", "--no-tray")
 	cmd.Dir = OmniroutePath
 	
-	cmd.Env = append(os.Environ(), 
-		"CI=true", 
-		"BROWSER=none", 
+	cmd.Env = append(os.Environ(),
+		"CI=true",
+		"BROWSER=none",
 		"NONINTERACTIVE=true",
 	)
 
-	if runtime.GOOS == "windows" {
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			CreationFlags: 0x08000000 | 0x00000200,
-		}
-	}
+	configureStartCmd(cmd)
 
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
@@ -987,20 +946,37 @@ func startWatchdog() {
 
 func openBrowser(url string) {
 	if runtime.GOOS == "windows" {
-		exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
-	} else if runtime.GOOS == "darwin" {
-		exec.Command("open", url).Start()
-	} else {
-		exec.Command("xdg-open", url).Start()
+		_ = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+		return
 	}
+	if runtime.GOOS == "darwin" {
+		_ = exec.Command("open", url).Start()
+		return
+	}
+	// linux: try xdg-open, then sensible-browser, www-browser, gio
+	for _, opener := range []string{"xdg-open", "sensible-browser", "www-browser", "gio"} {
+		if _, err := exec.LookPath(opener); err == nil {
+			var cmd *exec.Cmd
+			if opener == "gio" {
+				cmd = exec.Command("gio", "open", url)
+			} else {
+				cmd = exec.Command(opener, url)
+			}
+			if err := cmd.Start(); err == nil {
+				return
+			}
+		}
+	}
+	// last resort: try xdg-open anyway
+	_ = exec.Command("xdg-open", url).Start()
 }
 
 func startWebServer() {
 	http.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "app.ico")
+		http.ServeFile(w, r, getIconPath())
 	})
 
-	http.Handle("/themes/", http.StripPrefix("/themes/", http.FileServer(http.Dir("themes"))))
+	http.Handle("/themes/", http.StripPrefix("/themes/", http.FileServer(http.Dir(getThemesDir()))))
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -1107,7 +1083,7 @@ func startWebServer() {
 	http.HandleFunc("/api/file-logs", func(w http.ResponseWriter, r *http.Request) {
 		logMutex.Lock()
 		defer logMutex.Unlock()
-		data, err := os.ReadFile(LogFileName)
+		data, err := os.ReadFile(getLogPath())
 		if err != nil {
 			w.Write([]byte("Henüz log dosyası oluşturulmadı."))
 			return
@@ -1140,7 +1116,7 @@ func main() {
 }
 
 func onReady() {
-	iconBytes, err := os.ReadFile("app.ico")
+	iconBytes, err := os.ReadFile(getIconPath())
 	if err != nil {
 		defaultIconBase64 := "AAABAAEAEBAAAAEAIABoBAAAFgAAACgAAAAQAAAAIAAAAAEAIAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgICA/wAAAP8AAAD/AAAA/wAAAP8AAAD/AAAA/wAAAP8AAAD/AAAA/wAAAP8AAAD/AAAA/wAAAP8CAgL/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 		iconBytes, _ = base64.StdEncoding.DecodeString(defaultIconBase64)
