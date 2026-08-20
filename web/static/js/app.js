@@ -1,8 +1,12 @@
 function switchTab(tabId, btn) {
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-    document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-    document.getElementById(tabId).classList.add('active');
-    btn.classList.add('active');
+    document.querySelectorAll('.tab-content').forEach(el => {
+        if (el.id === tabId) el.classList.add('active');
+    });
+    if (btn) {
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        btn.classList.add('active');
+    }
     if (tabId === 'terminal-tab') setTimeout(() => fitAddon.fit(), 50);
     else if (tabId === 'logs-tab') fetchFileLogs();
 }
@@ -25,13 +29,6 @@ const btnStop = document.getElementById('btnStop');
 const btnRestart = document.getElementById('btnRestart');
 const btnOpenOmni = document.getElementById('btnOpenOmni');
 const serverLogsBox = document.getElementById('server-logs');
-const healthCard = document.getElementById('omniHealthCard');
-const healthBadge = document.getElementById('healthBadge');
-const healthBody = document.getElementById('healthBody');
-const healthMeta = document.getElementById('healthMeta');
-const healthActions = document.getElementById('healthActions');
-const healthIcon = document.getElementById('healthIcon');
-const healthProgress = document.getElementById('healthProgress');
 
 function updateUI(isRunning) {
     const h = window.lastHealth;

@@ -1,3 +1,11 @@
+const healthCard = document.getElementById('omniHealthCard');
+const healthBadge = document.getElementById('healthBadge');
+const healthBody = document.getElementById('healthBody');
+const healthMeta = document.getElementById('healthMeta');
+const healthActions = document.getElementById('healthActions');
+const healthIcon = document.getElementById('healthIcon');
+const healthProgress = document.getElementById('healthProgress');
+
 async function loadOmniHealth() {
     try {
         const res = await fetch('/api/omni/health');
@@ -42,7 +50,6 @@ function renderHealth(h) {
     if (h.health) meta += '<span>health: ' + h.health + '</span>';
     healthMeta.innerHTML = meta;
 
-    // progress
     const installing = h.opRunning || h.status === 'installing';
     if (healthProgress) healthProgress.style.display = installing ? 'block' : 'none';
     if (installing && healthProgress) {
@@ -92,9 +99,8 @@ async function doOmniAction(action) {
     term.write('\r\n\x1b[38;2;99;102;241m> ' + T.TermActionStart.replace('{action}', action) + '\x1b[0m\r\n');
     document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
     document.getElementById('terminal-tab').classList.add('active');
-    document.querySelectorAll('.tab-btn').forEach((el,i)=>{ el.classList.toggle('active', i===0); });
+    document.querySelectorAll('.nav-item').forEach((el,i)=>{ el.classList.toggle('active', i===0); });
     setTimeout(()=>fitAddon.fit(),50);
-    // faster polling during install
     const fastHealth = setInterval(loadOmniHealth, 2000);
     const fastLogs = setInterval(fetchLogs, 300);
     try {
@@ -115,7 +121,6 @@ async function doOmniAction(action) {
         healthActions.dataset.busy="0";
         if (healthProgress) healthProgress.style.display='none';
         await loadOmniHealth();
-        // restore normal intervals (health 8s, logs 1s already running)
     }, 8000);
 }
 

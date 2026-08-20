@@ -15,6 +15,12 @@ function applyTheme(theme) {
     document.querySelectorAll('.theme-option').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.theme === theme);
     });
+    const icon = document.getElementById('themeIcon');
+    if (icon) {
+        if (theme === 'light') icon.textContent = 'light_mode';
+        else if (theme === 'dark') icon.textContent = 'dark_mode';
+        else icon.textContent = 'brightness_auto';
+    }
 }
 
 async function setTheme(theme) {
