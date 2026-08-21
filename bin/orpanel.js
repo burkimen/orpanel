@@ -35,7 +35,7 @@ if (!bin) {
 
 // pass through args
 const args = process.argv.slice(2);
-const child = spawn(bin, args, { stdio: "inherit" });
+const child = spawn(bin, args, { stdio: "inherit", cwd: ROOT });
 child.on("exit", (code, sig) => {
   if (sig) process.kill(process.pid, sig);
   else process.exit(code ?? 0);
