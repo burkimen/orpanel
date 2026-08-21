@@ -5,3 +5,6 @@ panel.log
 .DS_Store
 orPanel.exe~
 *.exe~
+config.json
+panel.log
+dist/
