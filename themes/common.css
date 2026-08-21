@@ -14,8 +14,8 @@ body { font-family: var(--font-sans); background-color: var(--color-bg); backgro
 .sidebar-collapse { background: none; border: none; color: var(--color-text-muted); cursor: pointer; padding: 4px; border-radius: 6px; display: flex; }
 .sidebar-collapse:hover { background: var(--surface-2); color: var(--color-text-main); }
 .brand { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
-.brand-icon { width: 28px; height: 28px; border-radius: 8px; background: var(--grad-brand); display: flex; align-items: center; justify-content: center; color: #fff; flex-shrink: 0; }
-.brand-icon svg { width: 16px; height: 16px; }
+.brand-icon { width: 28px; height: 28px; border-radius: 8px; overflow: hidden; flex-shrink: 0; }
+.brand-icon img { display: block; width: 100%; height: 100%; }
 .brand-text { display: flex; flex-direction: column; line-height: 1; }
 .brand-text strong { font-size: 12px; font-weight: 700; color: var(--color-text-main); }
 .brand-text span { font-size: 9px; color: var(--color-text-muted); }
@@ -49,11 +49,8 @@ button.action-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none
 .tab-content.active { display: flex; }
 .health-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 0; display: flex; flex-direction: column; box-shadow: var(--shadow-soft); width: 100%; overflow: hidden; }
 .health-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--color-border); }
-.health-icon-wrap { width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.health-icon-wrap.tone-ok { background: color-mix(in oklab, var(--color-success) 15%, var(--color-surface)); color: var(--color-success); }
-.health-icon-wrap.tone-warn { background: color-mix(in oklab, var(--color-warning) 15%, var(--color-surface)); color: var(--color-warning); }
-.health-icon-wrap.tone-error { background: color-mix(in oklab, var(--color-error) 15%, var(--color-surface)); color: var(--color-error); }
-.health-icon-wrap .material-symbols-rounded { font-size: 16px; }
+.health-icon-wrap { width: 28px; height: 28px; border-radius: 8px; overflow: hidden; flex-shrink: 0; }
+.health-icon-wrap img { display: block; width: 100%; height: 100%; }
 .health-title { display: flex; flex-direction: column; gap: 2px; flex: 1; }
 .health-title span:first-child { font-weight: 600; font-size: 13px; color: var(--color-text-main); }
 .health-title small { font-weight: 400; font-size: 11px; color: var(--color-text-muted); }

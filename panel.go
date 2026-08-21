@@ -536,6 +536,10 @@ func startWebServer() {
 		http.ServeFile(w, r, getIconPath())
 	})
 
+	http.HandleFunc("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, filepath.Join(exeDir(), "favicon.svg"))
+	})
+
 	http.Handle("/themes/", http.StripPrefix("/themes/", http.FileServer(http.Dir(getThemesDir()))))
 
 	// web static (js/css) - use ReadFile fallback approach

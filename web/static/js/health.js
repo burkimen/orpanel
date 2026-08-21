@@ -1,7 +1,5 @@
 const healthCard = document.getElementById('omniHealthCard');
 const healthBadge = document.getElementById('healthBadge');
-const healthIcon = document.getElementById('healthIcon');
-const healthIconWrap = document.getElementById('healthIconWrap');
 const healthValVersion = document.getElementById('healthValVersion');
 const healthValNode = document.getElementById('healthValNode');
 const healthValPath = document.getElementById('healthValPath');
@@ -29,18 +27,15 @@ function renderHealth(h) {
     if (healthEmpty) healthEmpty.style.display='none';
 
     // badge + header icon wrap color
-    let badgeText = h.status, badgeCls = "error", icon = "hub";
-    let wrapTone = "error";
-    if (h.status === "running") { badgeText = T.HealthBadgeRunning; badgeCls = "ok"; icon = "check_circle"; wrapTone = "ok"; }
-    else if (h.status === "stopped") { badgeText = T.HealthBadgeStopped; badgeCls = "warn"; icon = "pause_circle"; wrapTone = "warn"; }
-    else if (h.status === "not_installed") { badgeText = T.HealthBadgeNotInstalled; badgeCls = "error"; icon = "cloud_off"; wrapTone = "error"; }
-    else if (h.status === "port_conflict") { badgeText = T.HealthBadgePortConflict; badgeCls = "error"; icon = "error"; wrapTone = "error"; }
-    else if (h.status === "corrupt") { badgeText = T.HealthBadgeCorrupt; badgeCls = "error"; icon = "broken_image"; wrapTone = "error"; }
-    else if (h.status === "installing") { badgeText = T.HealthBadgeInstalling; badgeCls = "warn"; icon = "hourglass_top"; wrapTone = "warn"; }
+    let badgeText = h.status, badgeCls = "error";
+    if (h.status === "running") { badgeText = T.HealthBadgeRunning; badgeCls = "ok"; }
+    else if (h.status === "stopped") { badgeText = T.HealthBadgeStopped; badgeCls = "warn"; }
+    else if (h.status === "not_installed") { badgeText = T.HealthBadgeNotInstalled; badgeCls = "error"; }
+    else if (h.status === "port_conflict") { badgeText = T.HealthBadgePortConflict; badgeCls = "error"; }
+    else if (h.status === "corrupt") { badgeText = T.HealthBadgeCorrupt; badgeCls = "error"; }
+    else if (h.status === "installing") { badgeText = T.HealthBadgeInstalling; badgeCls = "warn"; }
     healthBadge.textContent = badgeText;
     healthBadge.className = "health-badge " + badgeCls;
-    healthIcon.textContent = icon;
-    if (healthIconWrap) healthIconWrap.className = "health-icon-wrap tone-" + wrapTone;
 
     // rows
     const rowVer = document.getElementById('healthRowVersion');
