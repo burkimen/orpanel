@@ -93,9 +93,9 @@ if (resizeHandle && terminalPanel) {
 }
 
 function toggleTerminalMax() {
-    terminalPanel.classList.toggle('maximized');
+    terminalPanel.classList.toggle('collapsed');
     const icon = document.getElementById('terminalMaxIcon');
-    if (icon) icon.textContent = terminalPanel.classList.contains('maximized') ? 'expand_more' : 'expand_less';
+    if (icon) icon.textContent = terminalPanel.classList.contains('collapsed') ? 'expand_less' : 'expand_more';
     setTimeout(() => fitAddon.fit(), 50);
 }
 
