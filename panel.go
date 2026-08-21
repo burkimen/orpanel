@@ -38,6 +38,7 @@ var (
 )
 
 const AppName = "OmniroutePanel"
+const AppVersion = "1.0.0"
 const LogFileName = "panel.log"
 const ConfigFileName = "config.json"
 const LocalesDir = "locales"
@@ -550,10 +551,11 @@ func startWebServer() {
 		t := loadTranslations(cfg.Language)
 		tJson, _ := json.Marshal(t)
 		data := map[string]interface{}{
-			"Lang":  cfg.Language,
-			"Theme": cfg.Theme,
-			"T":     t,
-			"TJson": template.JS(tJson),
+			"Lang":       cfg.Language,
+			"Theme":      cfg.Theme,
+			"T":          t,
+			"TJson":      template.JS(tJson),
+			"AppVersion": AppVersion,
 		}
 		tmplData, _ := fs.ReadFile(webFS, "web/templates/index.html")
 		tmpl := template.Must(template.New("index").Parse(string(tmplData)))
