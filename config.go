@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const ThemeLight = "light"
@@ -30,14 +31,11 @@ func loadConfigUnlocked() Config {
 		}
 	}
 	if err != nil {
-		return Config{Language: "tr", AutoStart: false, Theme: ThemeSystem}
+		return Config{Language: "", AutoStart: false, Theme: ThemeSystem}
 	}
 	var cfg Config
 	if err := json.Unmarshal(file, &cfg); err != nil {
-		return Config{Language: "tr", AutoStart: false, Theme: ThemeSystem}
-	}
-	if cfg.Language == "" {
-		cfg.Language = "tr"
+		return Config{Language: "", AutoStart: false, Theme: ThemeSystem}
 	}
 	if !isValidTheme(cfg.Theme) {
 		cfg.Theme = ThemeSystem
@@ -105,4 +103,20 @@ func loadTranslations(lang string) map[string]string {
 	var t map[string]string
 	json.Unmarshal(file, &t)
 	return t
+}
+
+func detectLanguage(acceptLang string) string {
+	if acceptLang == "" {
+		return "en"
+	}
+	acceptLang = strings.ToLower(acceptLang)
+	for _, supported := range []string{"tr", "en", "es"} {
+		if strings.Contains(acceptLang, supported) {
+			return supported
+		}
+	}
+	if strings.Contains(acceptLang, "zh") || strings.Contains(acceptLang, "ja") || strings.Contains(acceptLang, "ko") {
+		return "en"
+	}
+	return "en"
 }

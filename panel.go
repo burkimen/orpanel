@@ -552,6 +552,22 @@ func startWebServer() {
 			return
 		}
 		cfg := loadConfig()
+		// First launch: auto-detect language from browser
+		if cfg.Language == "" || cfg.Language == "tr" {
+			if _, err := os.Stat(getConfigPath()); os.IsNotExist(err) {
+				detected := detectLanguage(r.Header.Get("Accept-Language"))
+				cfg.Language = detected
+				if cfg.Theme == "" || cfg.Theme == ThemeSystem {
+					detectedTheme := "dark"
+					if strings.Contains(strings.ToLower(r.Header.Get("Sec-CH-Prefers-Color-Scheme")), "light") {
+						detectedTheme = "light"
+					}
+					cfg.Theme = detectedTheme
+				}
+				saveConfig(cfg.Language, cfg.AutoStart)
+				saveTheme(cfg.Theme)
+			}
+		}
 		t := loadTranslations(cfg.Language)
 		tJson, _ := json.Marshal(t)
 		data := map[string]interface{}{
