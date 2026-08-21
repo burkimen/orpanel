@@ -721,11 +721,44 @@ func main() {
 	initFileLog()
 	tInit := loadTranslations(currentLang)
 	writeLog("%s", tInit["LogStarted"])
-	
-	startWatchdog()
 
-	go startWebServer()
-	systray.Run(onReady, onExit)
+	args := os.Args[1:]
+
+	// Direct mode flags
+	for _, arg := range args {
+		switch arg {
+		case "--help", "-h":
+			showBanner()
+			fmt.Println("  Usage: orpanel [options]")
+			fmt.Println()
+			fmt.Println("  Options:")
+			fmt.Println("    --web      Open web UI in browser")
+			fmt.Println("    --tray     Start in system tray (background)")
+			fmt.Println("    --version  Show version")
+			fmt.Println("    --help     Show this help")
+			fmt.Println()
+			fmt.Println("  No flags: interactive CLI menu")
+			return
+		case "--version", "-v":
+			fmt.Printf("orpanel v%s\n", getAppVersion())
+			return
+		case "--web":
+			startWatchdog()
+			go startWebServer()
+			fmt.Printf("Server: http://localhost:20127\n")
+			openBrowser("http://localhost:20127")
+			// Keep alive
+			select {}
+		case "--tray":
+			startWatchdog()
+			go startWebServer()
+			systray.Run(onReady, onExit)
+			return
+		}
+	}
+
+	// No flags: interactive CLI menu
+	runCLI()
 }
 
 func onReady() {
