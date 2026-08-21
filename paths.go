@@ -22,16 +22,18 @@ func exeDir() string {
 	exe, err := os.Executable()
 	if err == nil {
 		dir := filepath.Dir(exe)
-		// When running via `go run`, exe is in temp; fall back to cwd if locales/themes not found there
+		// Check binary's own directory first
 		if _, err := os.Stat(filepath.Join(dir, "locales")); err == nil {
 			cachedExeDir = dir
 			return cachedExeDir
 		}
-		if _, err := os.Stat(filepath.Join(dir, "themes")); err == nil {
-			cachedExeDir = dir
+		// Check parent directory (e.g. dist/ -> package root)
+		parent := filepath.Dir(dir)
+		if _, err := os.Stat(filepath.Join(parent, "locales")); err == nil {
+			cachedExeDir = parent
 			return cachedExeDir
 		}
-		// fallback to working dir for dev
+		// Check cwd (for dev / npm link)
 		if cwd, err := os.Getwd(); err == nil {
 			if _, err := os.Stat(filepath.Join(cwd, "locales")); err == nil {
 				cachedExeDir = cwd

@@ -38,7 +38,7 @@ var (
 )
 
 const AppName = "OmniroutePanel"
-const AppVersion = "1.0.0"
+const AppVersion = "1.0.2"
 const LogFileName = "panel.log"
 const ConfigFileName = "config.json"
 const LocalesDir = "locales"
