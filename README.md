@@ -4,7 +4,9 @@ A cross-platform desktop control panel for [OmniRoute](https://github.com/Torhun
 
 > Built with ❤️ for the OmniRoute community.
 
-![orPanel Screenshot](https://raw.githubusercontent.com/burkimen/orpanel/main/screenshot.png)
+![orPanel Status](https://raw.githubusercontent.com/burkimen/orpanel/main/screenshot.png)
+
+![orPanel Settings](https://raw.githubusercontent.com/burkimen/orpanel/main/screenshot_settings.png)
 
 ## Features
 
