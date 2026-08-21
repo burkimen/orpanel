@@ -6,6 +6,7 @@ const healthValVersion = document.getElementById('healthValVersion');
 const healthValNode = document.getElementById('healthValNode');
 const healthValPath = document.getElementById('healthValPath');
 const healthValPort = document.getElementById('healthValPort');
+const healthValUpdate = document.getElementById('healthValUpdate');
 const healthActions = document.getElementById('healthActions');
 const healthProgress = document.getElementById('healthProgress');
 const healthEmpty = document.getElementById('healthEmpty');
@@ -42,17 +43,37 @@ function renderHealth(h) {
     if (healthIconWrap) healthIconWrap.className = "health-icon-wrap tone-" + wrapTone;
 
     // rows
-    const ver = h.version ? T.HealthInstalled + " <strong>" + h.version + "</strong>" + (h.latest ? " → <strong>" + h.latest + "</strong>" : "") + (h.updateAvailable ? " <span class='health-tag'>" + T.HealthUpdateAvail + "</span>" : "") : T.HealthBadgeNotInstalled;
-    healthValVersion.innerHTML = ver;
     const rowVer = document.getElementById('healthRowVersion');
-    if (rowVer) rowVer.style.display = h.installed ? 'flex' : 'none';
+    if (rowVer) {
+        if (h.installed && h.version) {
+            healthValVersion.innerHTML = h.version;
+            rowVer.style.display = 'flex';
+        } else if (!h.installed) {
+            healthValVersion.textContent = T.HealthBadgeNotInstalled;
+            rowVer.style.display = 'flex';
+        } else {
+            rowVer.style.display = 'none';
+        }
+    }
 
     if (!h.nodeOk) healthValNode.innerHTML = (h.nodeVersion || T.HealthNodeNotFound) + " <span class='health-tag error'>" + T.HealthNodeReq + "</span>";
     else healthValNode.textContent = h.nodeVersion || "—";
 
     healthValPath.textContent = h.path || "—";
-    const portText = (h.portFree ? T.HealthPortFreeShort : T.HealthPortOccupiedShort) + " 20128 · " + (h.health || "");
-    healthValPort.textContent = portText;
+    const portStatus = h.portFree ? T.HealthPortFreeShort : T.HealthPortOccupiedShort;
+    const portHealth = h.health || "";
+    healthValPort.textContent = portStatus + " · " + portHealth;
+
+    // Update row: show only when installed and update available
+    const rowUpdate = document.getElementById('healthRowUpdate');
+    if (rowUpdate) {
+        if (h.installed && h.updateAvailable && h.latest) {
+            healthValUpdate.innerHTML = "<strong>" + h.version + "</strong> → <strong>" + h.latest + "</strong>";
+            rowUpdate.style.display = 'flex';
+        } else {
+            rowUpdate.style.display = 'none';
+        }
+    }
 
     const installing = h.opRunning || h.status === 'installing';
     if (healthProgress) healthProgress.style.display = installing ? 'block' : 'none';

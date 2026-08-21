@@ -80,5 +80,7 @@
   "HealthLabelPath": "Location",
   "HealthLoading": "Loading status...",
   "HealthPortFreeShort": "Free",
-  "HealthPortOccupiedShort": "Occupied"
+  "HealthPortOccupiedShort": "Occupied",
+  "HealthLabelUpdate": "Update",
+  "HealthLabelPort": "Port"
 }

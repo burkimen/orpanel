@@ -80,5 +80,7 @@
   "HealthLabelPath": "Konum",
   "HealthLoading": "Durum yükleniyor...",
   "HealthPortFreeShort": "Serbest",
-  "HealthPortOccupiedShort": "Dolu"
+  "HealthPortOccupiedShort": "Dolu",
+  "HealthLabelUpdate": "Güncelleme",
+  "HealthLabelPort": "Port"
 }
