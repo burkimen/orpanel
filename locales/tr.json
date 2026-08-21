@@ -73,5 +73,12 @@
   "TopbarSubtitle": "OmniRoute'a hoş geldiniz",
   "TopbarSearch": "Hızlı gezinme",
   "TabStatus": "Durum",
-  "TerminalHeader": "Omniroute Terminali"
+  "TerminalHeader": "Omniroute Terminali",
+  "HealthSubtitle": "Canlılık ve sürüm özeti",
+  "HealthLabelVersion": "Versiyon",
+  "HealthLabelNode": "Node",
+  "HealthLabelPath": "Konum",
+  "HealthLoading": "Durum yükleniyor...",
+  "HealthPortFreeShort": "Serbest",
+  "HealthPortOccupiedShort": "Dolu"
 }

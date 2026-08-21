@@ -47,18 +47,31 @@ button.action-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none
 .content-area { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .tab-content { display: none; flex-direction: column; width: 100%; }
 .tab-content.active { display: flex; }
-.health-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow-soft); width: 100%; }
-.health-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.health-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }
-.health-badge { padding: 3px 8px; border-radius: 9999px; font-size: 10px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; border: 1px solid transparent; }
+.health-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 0; display: flex; flex-direction: column; box-shadow: var(--shadow-soft); width: 100%; overflow: hidden; }
+.health-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--color-border); }
+.health-icon-wrap { width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.health-icon-wrap.tone-ok { background: color-mix(in oklab, var(--color-success) 15%, var(--color-surface)); color: var(--color-success); }
+.health-icon-wrap.tone-warn { background: color-mix(in oklab, var(--color-warning) 15%, var(--color-surface)); color: var(--color-warning); }
+.health-icon-wrap.tone-error { background: color-mix(in oklab, var(--color-error) 15%, var(--color-surface)); color: var(--color-error); }
+.health-icon-wrap .material-symbols-rounded { font-size: 16px; }
+.health-title { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.health-title span:first-child { font-weight: 600; font-size: 13px; color: var(--color-text-main); }
+.health-title small { font-weight: 400; font-size: 11px; color: var(--color-text-muted); }
+.health-badge { padding: 3px 8px; border-radius: 9999px; font-size: 10px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; border: 1px solid transparent; flex-shrink: 0; }
 .health-badge.ok { background: color-mix(in oklab, var(--color-success) 14%, var(--color-surface)); color: var(--color-success); border-color: color-mix(in oklab, var(--color-success) 20%, transparent); }
 .health-badge.warn { background: color-mix(in oklab, var(--color-warning) 14%, var(--color-surface)); color: #b45309; border-color: color-mix(in oklab, var(--color-warning) 25%, transparent); }
 .health-badge.error { background: color-mix(in oklab, var(--color-error) 14%, var(--color-surface)); color: var(--color-error); border-color: color-mix(in oklab, var(--color-error) 20%, transparent); }
-.health-body { font-size: 12px; color: var(--color-text-muted); line-height: 1.5; }
-.health-body strong { color: var(--color-text-main); }
-.health-meta { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--color-text-muted); }
-.health-meta span { display: flex; align-items: center; gap: 4px; }
-.health-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.health-rows { display: flex; flex-direction: column; }
+.health-row { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--color-border); font-size: 12px; }
+.health-row:last-child { border-bottom: none; }
+.health-row .material-symbols-rounded { font-size: 16px; color: var(--color-text-muted); flex-shrink: 0; width: 20px; text-align: center; }
+.health-row-label { color: var(--color-text-muted); font-weight: 500; min-width: 70px; }
+.health-row-value { color: var(--color-text-main); font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.health-row-value strong { color: var(--color-text-main); }
+.health-tag { background: var(--surface-2); border: 1px solid var(--color-border); border-radius: 6px; padding: 2px 6px; font-size: 10px; font-weight: 600; }
+.health-tag.error { background: color-mix(in oklab, var(--color-error) 12%, var(--color-surface)); color: var(--color-error); border-color: color-mix(in oklab, var(--color-error) 20%, transparent); }
+.health-empty { display: flex; align-items: center; gap: 10px; padding: 24px; justify-content: center; color: var(--color-text-muted); font-size: 13px; }
+.health-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; padding: 12px 16px; border-top: 1px solid var(--color-border); background: color-mix(in oklab, var(--color-bg) 50%, var(--color-surface)); }
 .btn-health { height: 30px; padding: 0 12px; border-radius: var(--radius-control); font-weight: 600; font-size: 12px; border: 1px solid transparent; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: all 0.2s; font-family: inherit; }
 .btn-health:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-health.primary { background: var(--color-primary); color:#fff; }

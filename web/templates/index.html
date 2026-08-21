@@ -41,12 +41,21 @@
         <div class="content-area">
             <div id="status-tab" class="tab-content active">
                 <div id="omniHealthCard" class="health-card" style="display:none">
-                    <div class="health-header"><div class="health-title"><span class="material-symbols-rounded" id="healthIcon">hub</span> <span id="healthTitle">{{.T.OmniHealthTitle}}</span></div><span id="healthBadge" class="health-badge">...</span></div>
-                    <div id="healthBody" class="health-body"></div>
-                    <div id="healthMeta" class="health-meta"></div>
+                    <div class="health-header">
+                        <div class="health-icon-wrap" id="healthIconWrap"><span class="material-symbols-rounded" id="healthIcon">hub</span></div>
+                        <div class="health-title"><span id="healthTitle">{{.T.OmniHealthTitle}}</span><small id="healthSubtitle">{{.T.HealthSubtitle}}</small></div>
+                        <span id="healthBadge" class="health-badge">...</span>
+                    </div>
+                    <div class="health-rows">
+                        <div class="health-row" id="healthRowVersion"><span class="material-symbols-rounded">tag</span><span class="health-row-label">{{.T.HealthLabelVersion}}</span><span class="health-row-value" id="healthValVersion">...</span></div>
+                        <div class="health-row" id="healthRowNode"><span class="material-symbols-rounded">code</span><span class="health-row-label">{{.T.HealthLabelNode}}</span><span class="health-row-value" id="healthValNode">...</span></div>
+                        <div class="health-row" id="healthRowPath"><span class="material-symbols-rounded">folder</span><span class="health-row-label">{{.T.HealthLabelPath}}</span><span class="health-row-value" id="healthValPath">...</span></div>
+                        <div class="health-row" id="healthRowPort"><span class="material-symbols-rounded">lan</span><span class="health-row-label">20128</span><span class="health-row-value" id="healthValPort">...</span></div>
+                    </div>
                     <div id="healthActions" class="health-actions"></div>
                     <div id="healthProgress" class="health-progress" style="display:none"><div class="health-progress-bar"></div></div>
                 </div>
+                <div id="healthEmpty" class="health-empty" style="display:none"><span class="material-symbols-rounded">hourglass_top</span><span id="healthEmptyText">{{.T.HealthLoading}}</span></div>
             </div>
             <div id="logs-tab" class="tab-content"><div id="server-logs" class="logs-card">{{.T.Loading}}</div></div>
             <div id="settings-tab" class="tab-content">

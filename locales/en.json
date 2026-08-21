@@ -73,5 +73,12 @@
   "TopbarSubtitle": "Welcome to OmniRoute",
   "TopbarSearch": "Quick search",
   "TabStatus": "Status",
-  "TerminalHeader": "OmniRoute Terminal"
+  "TerminalHeader": "OmniRoute Terminal",
+  "HealthSubtitle": "Liveness and version summary",
+  "HealthLabelVersion": "Version",
+  "HealthLabelNode": "Node",
+  "HealthLabelPath": "Location",
+  "HealthLoading": "Loading status...",
+  "HealthPortFreeShort": "Free",
+  "HealthPortOccupiedShort": "Occupied"
 }
