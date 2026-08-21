@@ -20,6 +20,10 @@
   ],
   "scripts": {
     "postinstall": "node bin/postinstall.js",
+    "release": "node scripts/release.js",
+    "release:patch": "node scripts/release.js patch",
+    "release:minor": "node scripts/release.js minor",
+    "release:major": "node scripts/release.js major",
     "test": "echo \"no test\" && exit 0"
   },
   "keywords": ["omniroute", "orpanel", "ai", "router", "tray", "panel", "go"],
