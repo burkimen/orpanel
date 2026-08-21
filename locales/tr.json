@@ -71,5 +71,7 @@
   "SearchShort": "Ara",
   "SidebarFooter": "OmniRoute Kontrol Paneli",
   "TopbarSubtitle": "OmniRoute'a hoş geldiniz",
-  "TopbarSearch": "Hızlı gezinme"
+  "TopbarSearch": "Hızlı gezinme",
+  "TabStatus": "Durum",
+  "TerminalHeader": "Omniroute Terminali"
 }

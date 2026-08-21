@@ -1,14 +1,11 @@
 function switchTab(tabId, btn) {
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(el => {
-        if (el.id === tabId) el.classList.add('active');
-    });
-    if (btn) {
-        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-        btn.classList.add('active');
-    }
-    if (tabId === 'terminal-tab') setTimeout(() => fitAddon.fit(), 50);
-    else if (tabId === 'logs-tab') fetchFileLogs();
+    document.getElementById(tabId)?.classList.add('active');
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    btn?.classList.add('active');
+    const title = btn?.dataset?.title || T.TabStatus;
+    document.getElementById('topbarTitle').textContent = title;
+    if (tabId === 'logs-tab') fetchFileLogs();
 }
 
 const term = new Terminal({
@@ -22,33 +19,24 @@ term.open(document.getElementById('terminal'));
 setTimeout(() => fitAddon.fit(), 100);
 window.addEventListener('resize', () => fitAddon.fit());
 
-const statusBadge = document.getElementById('statusBadge');
-const statusText = document.getElementById('statusText');
 const btnStart = document.getElementById('btnStart');
 const btnStop = document.getElementById('btnStop');
 const btnRestart = document.getElementById('btnRestart');
 const btnOpenOmni = document.getElementById('btnOpenOmni');
+const statusBadge = document.getElementById('statusBadge');
+const statusText = document.getElementById('statusText');
 const serverLogsBox = document.getElementById('server-logs');
 
 function updateUI(isRunning) {
     const h = window.lastHealth;
     const block = h && (!h.installed || h.opRunning || h.status === 'installing' || h.status === 'not_installed' || h.health === 'installing');
     if (block) {
-        statusText.textContent = h ? h.message : T.StatusClosed;
-        statusBadge.classList.remove("active");
-        statusBadge.querySelector('.material-symbols-rounded').textContent = "cloud_off";
         btnStart.disabled = true; btnStop.disabled = true; btnRestart.disabled = true; btnOpenOmni.disabled = true;
         return;
     }
     if (isRunning) {
-        statusText.textContent = T.StatusActive;
-        statusBadge.classList.add("active");
-        statusBadge.querySelector('.material-symbols-rounded').textContent = "radio_button_checked";
         btnStart.disabled = true; btnStop.disabled = false; btnRestart.disabled = false; btnOpenOmni.disabled = false;
     } else {
-        statusText.textContent = T.StatusClosed;
-        statusBadge.classList.remove("active");
-        statusBadge.querySelector('.material-symbols-rounded').textContent = "radio_button_unchecked";
         btnStart.disabled = false; btnStop.disabled = true; btnRestart.disabled = true; btnOpenOmni.disabled = true;
     }
 }
@@ -80,13 +68,43 @@ async function fetchFileLogs() {
     try {
         const res = await fetch('/api/file-logs');
         const text = await res.text();
-        serverLogsBox.textContent = text;
-        serverLogsBox.scrollTop = serverLogsBox.scrollHeight;
+        if (serverLogsBox) { serverLogsBox.textContent = text; serverLogsBox.scrollTop = serverLogsBox.scrollHeight; }
     } catch(e) {}
+}
+
+// Terminal resize handle
+const resizeHandle = document.getElementById('resizeHandle');
+const terminalPanel = document.getElementById('terminalPanel');
+if (resizeHandle && terminalPanel) {
+    let startY, startH;
+    resizeHandle.addEventListener('mousedown', e => {
+        e.preventDefault();
+        startY = e.clientY;
+        startH = terminalPanel.offsetHeight;
+        resizeHandle.classList.add('active');
+        document.addEventListener('mousemove', onResize);
+        document.addEventListener('mouseup', onResizeEnd);
+    });
+    function onResize(e) {
+        const newH = startH - (e.clientY - startY);
+        terminalPanel.style.height = Math.max(120, Math.min(newH, window.innerHeight * 0.7)) + 'px';
+        fitAddon.fit();
+    }
+    function onResizeEnd() {
+        resizeHandle.classList.remove('active');
+        document.removeEventListener('mousemove', onResize);
+        document.removeEventListener('mouseup', onResizeEnd);
+    }
+}
+
+function toggleTerminalMax() {
+    terminalPanel.classList.toggle('maximized');
+    const icon = document.getElementById('terminalMaxIcon');
+    if (icon) icon.textContent = terminalPanel.classList.contains('maximized') ? 'expand_more' : 'expand_less';
+    setTimeout(() => fitAddon.fit(), 50);
 }
 
 checkStatus();
 setInterval(checkStatus, 3000);
 setInterval(fetchLogs, 1000);
-if (document.getElementById('logs-tab').classList.contains('active')) setInterval(fetchFileLogs, 3000);
 term.write('\x1b[38;2;181;204;140m' + T.TerminalReady + '\x1b[0m\r\n\r\n');

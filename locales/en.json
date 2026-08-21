@@ -71,5 +71,7 @@
   "SearchShort": "Search",
   "SidebarFooter": "OmniRoute Control Panel",
   "TopbarSubtitle": "Welcome to OmniRoute",
-  "TopbarSearch": "Quick search"
+  "TopbarSearch": "Quick search",
+  "TabStatus": "Status",
+  "TerminalHeader": "OmniRoute Terminal"
 }

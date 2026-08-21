@@ -30,33 +30,22 @@ function renderHealth(h) {
     healthBadge.textContent = badgeText;
     healthBadge.className = "health-badge " + badgeCls;
     healthIcon.textContent = icon;
-
     let body = h.message || "";
     if (h.installed && h.version) {
-        body += "<br><small>" + T.HealthInstalled + ":</small> <strong>" + h.version + "</strong> <small>(" + h.path + "</small>)";
+        body += "<br><small>" + T.HealthInstalled + ":</small> <strong>" + h.version + "</strong> <small>(" + h.path + ")</small>";
         if (h.latest) body += " → <strong>" + h.latest + "</strong>";
         if (h.updateAvailable) body += " <span style='color:var(--color-warning)'>" + T.HealthUpdateAvail + "</span>";
     }
-    if (!h.nodeOk) {
-        body += "<br>Node: " + (h.nodeVersion || T.HealthNodeNotFound) + " (<strong>" + T.HealthNodeReq + "</strong>)";
-    } else if (h.nodeVersion) {
-        body += "<br>Node " + h.nodeVersion;
-    }
+    if (!h.nodeOk) body += "<br>Node: " + (h.nodeVersion || T.HealthNodeNotFound) + " (<strong>" + T.HealthNodeReq + "</strong>)";
+    else if (h.nodeVersion) body += "<br>Node " + h.nodeVersion;
     healthBody.innerHTML = body;
-
     let meta = "";
     if (h.installed) meta += '<span><span class="material-symbols-rounded" style="font-size:14px">folder</span>' + h.path + '</span>';
     meta += '<span><span class="material-symbols-rounded" style="font-size:14px">lan</span>:' + (h.portFree ? T.HealthPortFree : T.HealthPortOccupied) + ' 20128</span>';
     if (h.health) meta += '<span>health: ' + h.health + '</span>';
     healthMeta.innerHTML = meta;
-
     const installing = h.opRunning || h.status === 'installing';
     if (healthProgress) healthProgress.style.display = installing ? 'block' : 'none';
-    if (installing && healthProgress) {
-        const bar = healthProgress.querySelector('.health-progress-bar');
-        if (bar) bar.style.width = '100%';
-    }
-
     let acts = "";
     const busy = healthActions.dataset.busy === "1" || h.opRunning;
     if (!h.installed) {
@@ -82,7 +71,6 @@ function renderHealth(h) {
         else acts += '<button class="btn-health ghost" onclick="doOmniAction(\'reinstall\')"><span class="material-symbols-rounded">restart_alt</span> ' + T.HealthBtnReinstall + '</button>';
     }
     healthActions.innerHTML = acts;
-
     const shouldDisableControls = !h.installed || h.opRunning || h.status === 'installing' || h.status === 'not_installed' || h.health === 'installing';
     [btnStart, btnStop, btnRestart, btnOpenOmni].forEach(btn => {
         if (shouldDisableControls) { btn.disabled = true; btn.setAttribute('title', h.message); }
@@ -96,32 +84,16 @@ async function doOmniAction(action) {
     btns.forEach(b=>b.disabled=true);
     healthActions.dataset.busy="1";
     if (healthProgress) healthProgress.style.display='block';
-    term.write('\r\n\x1b[38;2;99;102;241m> ' + T.TermActionStart.replace('{action}', action) + '\x1b[0m\r\n');
-    document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
-    document.getElementById('terminal-tab').classList.add('active');
-    document.querySelectorAll('.nav-item').forEach((el,i)=>{ el.classList.toggle('active', i===0); });
-    setTimeout(()=>fitAddon.fit(),50);
+    if (healthProgress) { const bar = healthProgress.querySelector('.health-progress-bar'); if (bar) bar.style.width = '100%'; }
     const fastHealth = setInterval(loadOmniHealth, 2000);
     const fastLogs = setInterval(fetchLogs, 300);
     try {
         const res = await fetch('/api/omni/'+action, {method:'POST'});
         const j = await res.json().catch(()=>({}));
-        if (!res.ok) {
-            term.write('\x1b[31m' + T.TermErr + ': ' + (j.error || res.statusText) +'\x1b[0m\r\n');
-            if (j.error && j.error.includes('Node')) term.write(T.TermNodeHelp + '\r\n');
-        } else {
-            term.write('\x1b[32m' + T.TermStarted.replace('{action}', action) + '\x1b[0m\r\n');
-            term.write(T.TermLogHint + '\r\n');
-        }
-    } catch(e) {
-        term.write('\x1b[31m' + T.TermReqErr + ': '+e+'\x1b[0m\r\n');
-    }
-    setTimeout(async()=>{
-        clearInterval(fastHealth); clearInterval(fastLogs);
-        healthActions.dataset.busy="0";
-        if (healthProgress) healthProgress.style.display='none';
-        await loadOmniHealth();
-    }, 8000);
+        if (!res.ok) term.write('\x1b[31m' + T.TermErr + ': ' + (j.error || res.statusText) +'\x1b[0m\r\n');
+        else term.write('\x1b[32m' + T.TermStarted.replace('{action}', action) + '\x1b[0m\r\n');
+    } catch(e) { term.write('\x1b[31m' + T.TermReqErr + ': '+e+'\x1b[0m\r\n'); }
+    setTimeout(async()=>{ clearInterval(fastHealth); clearInterval(fastLogs); healthActions.dataset.busy="0"; if (healthProgress) healthProgress.style.display='none'; await loadOmniHealth(); }, 8000);
 }
 
 loadOmniHealth();

@@ -71,5 +71,7 @@
   "SearchShort": "Buscar",
   "SidebarFooter": "Panel de control OmniRoute",
   "TopbarSubtitle": "Bienvenido a OmniRoute",
-  "TopbarSearch": "Búsqueda rápida"
+  "TopbarSearch": "Búsqueda rápida",
+  "TabStatus": "Estado",
+  "TerminalHeader": "Terminal OmniRoute"
 }
