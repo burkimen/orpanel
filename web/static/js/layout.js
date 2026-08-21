@@ -1,17 +1,19 @@
 function toggleSidebar() {
-    const sb = document.getElementById('sidebar');
     const app = document.querySelector('.app-layout');
-    if (!sb) return;
-    sb.classList.toggle('collapsed');
-    if (app) app.classList.toggle('sidebar-collapsed', sb.classList.contains('collapsed'));
-    localStorage.setItem('orpanel:sidebar', sb.classList.contains('collapsed') ? 'collapsed' : '');
+    const icon = document.getElementById('sidebarIcon');
+    if (!app) return;
+    app.classList.toggle('sidebar-collapsed');
+    const collapsed = app.classList.contains('sidebar-collapsed');
+    if (icon) icon.textContent = collapsed ? 'chevron_right' : 'chevron_left';
+    localStorage.setItem('orpanel:sidebar', collapsed ? 'collapsed' : '');
     setTimeout(() => fitAddon.fit(), 200);
 }
 
 // restore sidebar state
 try {
     if (localStorage.getItem('orpanel:sidebar')==='collapsed') {
-        document.getElementById('sidebar')?.classList.add('collapsed');
         document.querySelector('.app-layout')?.classList.add('sidebar-collapsed');
+        const icon = document.getElementById('sidebarIcon');
+        if (icon) icon.textContent = 'chevron_right';
     }
 } catch(e) {}

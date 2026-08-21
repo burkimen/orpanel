@@ -3,8 +3,7 @@ function switchTab(tabId, btn) {
     document.getElementById(tabId)?.classList.add('active');
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     btn?.classList.add('active');
-    const title = btn?.dataset?.title || T.TabStatus;
-    document.getElementById('topbarTitle').textContent = title;
+    document.getElementById('topbarTitle').textContent = btn?.dataset?.title || T.TabStatus;
     if (tabId === 'logs-tab') fetchFileLogs();
 }
 
@@ -16,15 +15,11 @@ const term = new Terminal({
 const fitAddon = new FitAddon.FitAddon();
 term.loadAddon(fitAddon);
 term.open(document.getElementById('terminal'));
-setTimeout(() => fitAddon.fit(), 100);
-window.addEventListener('resize', () => fitAddon.fit());
 
-const btnStart = document.getElementById('btnStart');
-const btnStop = document.getElementById('btnStop');
-const btnRestart = document.getElementById('btnRestart');
-const btnOpenOmni = document.getElementById('btnOpenOmni');
-const statusBadge = document.getElementById('statusBadge');
-const statusText = document.getElementById('statusText');
+const btnStart = document.getElementById('topBtnStart');
+const btnStop = document.getElementById('topBtnStop');
+const btnRestart = document.getElementById('topBtnRestart');
+const btnOpenOmni = document.getElementById('topBtnOmni');
 const serverLogsBox = document.getElementById('server-logs');
 
 function updateUI(isRunning) {
@@ -72,7 +67,7 @@ async function fetchFileLogs() {
     } catch(e) {}
 }
 
-// Terminal resize handle
+// Terminal resize
 const resizeHandle = document.getElementById('resizeHandle');
 const terminalPanel = document.getElementById('terminalPanel');
 if (resizeHandle && terminalPanel) {
@@ -87,7 +82,7 @@ if (resizeHandle && terminalPanel) {
     });
     function onResize(e) {
         const newH = startH - (e.clientY - startY);
-        terminalPanel.style.height = Math.max(120, Math.min(newH, window.innerHeight * 0.7)) + 'px';
+        terminalPanel.style.height = Math.max(80, Math.min(newH, window.innerHeight * 0.6)) + 'px';
         fitAddon.fit();
     }
     function onResizeEnd() {
@@ -104,7 +99,12 @@ function toggleTerminalMax() {
     setTimeout(() => fitAddon.fit(), 50);
 }
 
-checkStatus();
+// Init after DOM ready
+window.addEventListener('load', () => {
+    fitAddon.fit();
+    checkStatus();
+    loadOmniHealth();
+});
 setInterval(checkStatus, 3000);
 setInterval(fetchLogs, 1000);
 term.write('\x1b[38;2;181;204;140m' + T.TerminalReady + '\x1b[0m\r\n\r\n');
