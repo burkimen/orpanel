@@ -38,7 +38,25 @@ var (
 )
 
 const AppName = "OmniroutePanel"
-const AppVersion = "1.0.2"
+var cachedAppVersion string
+
+func getAppVersion() string {
+	if cachedAppVersion != "" {
+		return cachedAppVersion
+	}
+	data, err := os.ReadFile(filepath.Join(exeDir(), "package.json"))
+	if err == nil {
+		var pkg struct {
+			Version string `json:"version"`
+		}
+		if json.Unmarshal(data, &pkg) == nil && pkg.Version != "" {
+			cachedAppVersion = pkg.Version
+			return cachedAppVersion
+		}
+	}
+	cachedAppVersion = "0.0.0"
+	return cachedAppVersion
+}
 const LogFileName = "panel.log"
 const ConfigFileName = "config.json"
 const LocalesDir = "locales"
@@ -575,7 +593,7 @@ func startWebServer() {
 			"Theme":      cfg.Theme,
 			"T":          t,
 			"TJson":      template.JS(tJson),
-			"AppVersion": AppVersion,
+			"AppVersion": getAppVersion(),
 		}
 		tmplData, _ := fs.ReadFile(webFS, "web/templates/index.html")
 		tmpl := template.Must(template.New("index").Parse(string(tmplData)))
