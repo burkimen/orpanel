@@ -96,7 +96,19 @@ button.action-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none
 .btn-restart:hover { background: color-mix(in oklab, var(--color-warning) 92%, black); }
 .btn-omni { background: var(--color-accent); color: #fff; }
 .btn-omni:hover { background: var(--color-accent-hover); }
-.terminal-card { flex: 1; min-height: 300px; background-color: var(--md-sys-color-terminal-bg); color: var(--md-sys-color-terminal-fg); padding: 14px; border-radius: 10px; border: 1px solid var(--color-border); font-family: var(--font-mono); overflow: hidden; width: 100%; }
+.terminal-card { flex: 1; min-height: 300px; background-color: var(--md-sys-color-terminal-bg); color: var(--md-sys-color-terminal-fg); padding: 14px; border-radius: 10px; border: 1px solid var(--color-border); font-family: var(--font-mono); overflow: hidden; width: 100%; position: relative; contain: layout paint; }
+.xterm-helpers { overflow: hidden !important; width: 0 !important; height: 0 !important; }
+body > div[style*="50000px"],
+body > div[style*="-50000px"],
+div[style*="50000px"][style*="white-space"] {
+    width: 0 !important;
+    height: 0 !important;
+    left: -99999px !important;
+    top: -99999px !important;
+    visibility: hidden !important;
+    overflow: hidden !important;
+    display: none !important;
+}
 .logs-card { flex: 1; min-height: 400px; background-color: var(--md-sys-color-terminal-bg); color: var(--color-text-muted); padding: 14px; border-radius: 10px; border: 1px solid var(--color-border); font-family: var(--font-mono); overflow-y: auto; white-space: pre-wrap; width: 100%; }
 .settings-row { display: flex; justify-content: space-between; align-items: center; padding: 16px 18px; background: color-mix(in oklab, var(--color-bg) 96%, var(--color-text-main) 4%); border-radius: 10px; border: 1px solid var(--color-border); margin-bottom: 10px; }
 .toggle-switch { position: relative; display: inline-block; width: 44px; height: 24px; }
