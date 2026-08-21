@@ -1,6 +1,6 @@
 {
   "name": "orpanel",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "OmniRoute için çapraz platform masaüstü kontrol paneli — sistem tepsisi, yerleşik terminal, tema ve sağlık kontrolü",
   "type": "commonjs",
   "bin": {
