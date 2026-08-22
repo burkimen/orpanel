@@ -90,7 +90,24 @@ if [ -z "$BIN_SRC" ]; then
   BIN_SRC="$(find "$TMPDIR/extract" -type f -name "orpanel*" | head -n1)"
 fi
 if [ ! -f "$BIN_SRC" ]; then
-  echo "Binary bulunamadı" >&2; ls -R "$TMPDIR/extract" >&2; exit 1
+  echo "  Binary indirilemedi. Kaynaktan derleniyor..."
+  if command -v go >/dev/null 2>&1; then
+    REPO_DIR="$(mktemp -d)"
+    trap 'rm -rf "$REPO_DIR"' EXIT
+    echo "  Repozitori klonlaniyor..."
+    git clone --depth 1 "https://github.com/${REPO}.git" "$REPO_DIR"
+    cd "$REPO_DIR"
+    echo "  Derleniyor..."
+    CGO_ENABLED=1 go build -o "$BIN_SRC"
+    if [ ! -f "$BIN_SRC" ]; then
+      echo "Derleme basarisiz. Go 1.22+ gerekli." >&2; exit 1
+    fi
+  else
+    echo "Binary bulunamadi ve Go yuklu degil." >&2
+    echo "Go yukleyin: https://go.dev/dl/" >&2
+    echo "Veya: npm install -g orpanel" >&2
+    exit 1
+  fi
 fi
 
 # Install
