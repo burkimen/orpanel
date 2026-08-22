@@ -23,7 +23,7 @@ import (
 	"github.com/getlantern/systray"
 )
 
-//go:embed web
+//go:embed web themes locales app.ico icon.png favicon.svg
 var webFS embed.FS
 
 // --- EVRENSEL VE PLATFORMA DUYARLI YOL YAPILANDIRMASI ---
@@ -551,14 +551,25 @@ func openBrowser(url string) {
 
 func startWebServer() {
 	http.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		if data, err := fs.ReadFile(webFS, "app.ico"); err == nil {
+			w.Header().Set("Content-Type", "image/x-icon")
+			w.Write(data)
+			return
+		}
 		http.ServeFile(w, r, getIconPath())
 	})
 
 	http.HandleFunc("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
+		if data, err := fs.ReadFile(webFS, "favicon.svg"); err == nil {
+			w.Header().Set("Content-Type", "image/svg+xml")
+			w.Write(data)
+			return
+		}
 		http.ServeFile(w, r, filepath.Join(exeDir(), "favicon.svg"))
 	})
 
-	http.Handle("/themes/", http.StripPrefix("/themes/", http.FileServer(http.Dir(getThemesDir()))))
+	themesFS, _ := fs.Sub(webFS, "themes")
+	http.Handle("/themes/", http.StripPrefix("/themes/", http.FileServer(http.FS(themesFS))))
 
 	// web static (js/css) - use ReadFile fallback approach
 	staticFS, _ := fs.Sub(webFS, "web/static")
@@ -757,12 +768,30 @@ func main() {
 		}
 	}
 
-	// No flags: interactive CLI menu
+	// No flags: interactive CLI menu.
+	// If stdin is not a terminal (double-click, hidden window), start tray directly.
+	if !isTerminal() {
+		startWatchdog()
+		go startWebServer()
+		systray.Run(onReady, onExit)
+		return
+	}
 	runCLI()
 }
 
+func isTerminal() bool {
+	stat, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (stat.Mode() & os.ModeCharDevice) != 0
+}
+
 func onReady() {
-	iconBytes, err := os.ReadFile(getIconPath())
+	iconBytes, err := fs.ReadFile(webFS, "app.ico")
+	if err != nil {
+		iconBytes, err = os.ReadFile(getIconPath())
+	}
 	if err != nil {
 		defaultIconBase64 := "AAABAAEAEBAAAAEAIABoBAAAFgAAACgAAAAQAAAAIAAAAAEAIAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgICA/wAAAP8AAAD/AAAA/wAAAP8AAAD/AAAA/wAAAP8AAAD/AAAA/wAAAP8AAAD/AAAA/wAAAP8CAgL/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 		iconBytes, _ = base64.StdEncoding.DecodeString(defaultIconBase64)

@@ -3,8 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -89,11 +89,9 @@ func saveTheme(theme string) error {
 }
 
 func loadTranslations(lang string) map[string]string {
-	locDir := getLocalesDir()
-	filePath := filepath.Join(locDir, lang+".json")
-	file, err := os.ReadFile(filePath)
+	file, err := fs.ReadFile(webFS, "locales/"+lang+".json")
 	if err != nil {
-		file, err = os.ReadFile(filepath.Join(locDir, "tr.json"))
+		file, err = fs.ReadFile(webFS, "locales/tr.json")
 		if err != nil {
 			return map[string]string{
 				"Title": "Omniroute Control Panel",
