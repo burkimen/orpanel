@@ -38,24 +38,12 @@ var (
 )
 
 const AppName = "OmniroutePanel"
-var cachedAppVersion string
+var AppVersion = "dev"
 
-func getAppVersion() string {
-	if cachedAppVersion != "" {
-		return cachedAppVersion
+func init() {
+	if AppVersion == "dev" {
+		AppVersion = "0.0.0-dev"
 	}
-	data, err := os.ReadFile(filepath.Join(exeDir(), "package.json"))
-	if err == nil {
-		var pkg struct {
-			Version string `json:"version"`
-		}
-		if json.Unmarshal(data, &pkg) == nil && pkg.Version != "" {
-			cachedAppVersion = pkg.Version
-			return cachedAppVersion
-		}
-	}
-	cachedAppVersion = "0.0.0"
-	return cachedAppVersion
 }
 const LogFileName = "panel.log"
 const ConfigFileName = "config.json"
@@ -604,7 +592,7 @@ func startWebServer() {
 			"Theme":      cfg.Theme,
 			"T":          t,
 			"TJson":      template.JS(tJson),
-			"AppVersion": getAppVersion(),
+			"AppVersion": AppVersion,
 		}
 		tmplData, _ := fs.ReadFile(webFS, "web/templates/index.html")
 		tmpl := template.Must(template.New("index").Parse(string(tmplData)))
@@ -751,7 +739,7 @@ func main() {
 			fmt.Println("  No flags: interactive CLI menu")
 			return
 		case "--version", "-v":
-			fmt.Printf("orpanel v%s\n", getAppVersion())
+			fmt.Printf("orpanel v%s\n", AppVersion)
 			return
 		case "--web":
 			startWatchdog()

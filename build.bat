@@ -1,9 +1,10 @@
 @echo off
-echo Omniroute Panel Windows icin derleniyor...
-go build -ldflags "-H=windowsgui" -o orPanel.exe
+echo Omniroute Panel derleniyor...
+set VERSION=0.0.0
+if exist version.txt set /p VERSION=<version.txt
+go build -ldflags "-X main.AppVersion=%VERSION%" -o orPanel.exe
 if %errorlevel% neq 0 (
   echo Derleme hatasi!
   exit /b %errorlevel%
 )
-echo Derleme tamamlandi: orPanel.exe
-echo Not: app.ico, icon.png, themes\ ve locales\ exe ile ayni dizinde olmali
+echo Derleme tamamlandi: orPanel.exe (v%VERSION%)

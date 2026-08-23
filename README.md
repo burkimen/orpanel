@@ -20,61 +20,47 @@ A cross-platform desktop control panel for [OmniRoute](https://github.com/Torhun
 - **Theme System** — Light, Dark, System (auto-detect)
 - **Multi-language** — Turkish, English, Spanish (extensible)
 - **Cross-platform** — Windows, macOS, Linux
-- **No admin rights required** — Portable or XDG-compliant installation
+- **No dependencies** — Single binary, everything embedded
 
 ## Installation
 
-### 1. npm (recommended)
-
-```bash
-npm install -g orpanel
-orpanel
-```
-
-### 2. bun
-
-```bash
-bun add -g orpanel
-bunx orpanel
-```
-
-### 3. curl (Linux/macOS)
+### Unix (Linux/macOS)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/burkimen/orpanel/main/scripts/install/install.sh | sh
 ```
 
-### 4. PowerShell (Windows)
+### Windows (PowerShell)
 
 ```powershell
 irm https://raw.githubusercontent.com/burkimen/orpanel/main/scripts/install/install.ps1 | iex
 ```
 
-### 5. Homebrew
+### Update
+
+Just run the same command again — it will download the latest version.
+
+### Uninstall
 
 ```bash
-brew tap burkimen/orpanel
-brew install orpanel
+# Linux/macOS
+rm ~/.local/bin/orpanel
+
+# Windows
+Remove-Item "$env:LOCALAPPDATA\Programs\Orpanel\orPanel.exe"
 ```
 
-### 6. Nix
+## Usage
 
 ```bash
-nix profile install github:burkimen/orpanel
-```
-
-### 7. mise
-
-```bash
-mise use -g ubi:burkimen/orpanel
+orpanel              # Interactive CLI menu
+orpanel --web        # Open web UI in browser
+orpanel --tray       # Start in system tray
+orpanel --version    # Show version
+orpanel --help       # Show help
 ```
 
 ## Quick Start
-
-```bash
-orpanel           # Start the control panel
-orpanel --help    # Show help
-```
 
 Open `http://localhost:20127` in your browser. The panel will:
 
@@ -98,26 +84,26 @@ orPanel is designed to work seamlessly with [OmniRoute](https://github.com/Torhu
 ```bash
 git clone https://github.com/burkimen/orpanel.git
 cd orpanel
-go build -ldflags "-H=windowsgui" -o orPanel.exe   # Windows
-go build -o orPanel                                  # Linux/macOS
+go build -ldflags "-X main.AppVersion=dev" -o orPanel   # Linux/macOS
+go build -ldflags "-X main.AppVersion=dev" -o orPanel.exe  # Windows
 ```
 
-Requires Go 1.22+ and `themes/`, `locales/` directories alongside the binary.
+Requires Go 1.23+.
 
 ## Architecture
 
 ```
 orpanel/
 ├── panel.go           # HTTP server, system tray, process management
-├── config.go          # Config loading/saving
+├── cli.go             # CLI menu
+├── cli_windows.go     # Windows detached process
+├── config.go          # Config loading/saving, i18n
 ├── paths.go           # Cross-platform path resolution
 ├── omni_health.go     # OmniRoute health checks
 ├── omni_install.go    # npm install/update/repair operations
 ├── autostart_*.go     # Platform-specific autostart
 ├── dialog_*.go        # Platform-specific dialogs
-├── web/
-│   ├── templates/     # HTML templates (Go embed)
-│   └── static/js/     # Frontend JavaScript modules
+├── web/               # HTML templates, JS modules (embedded)
 ├── themes/            # CSS variables (dark/light)
 ├── locales/           # i18n strings (tr/en/es)
 └── scripts/install/   # curl/irm install scripts
