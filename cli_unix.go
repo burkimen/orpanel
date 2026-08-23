@@ -26,3 +26,6 @@ func spawnDetached() {
 		return
 	}
 }
+
+// hideConsole no-op on unix (no console window concept)
+func hideConsole() {}
