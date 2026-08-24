@@ -82,5 +82,19 @@
   "HealthPortFreeShort": "Serbest",
   "HealthPortOccupiedShort": "Dolu",
   "HealthLabelUpdate": "Güncelleme",
-  "HealthLabelPort": "Port"
+  "HealthLabelPort": "Port",
+  "SettingLogRetention": "Log Saklama Süresi",
+  "SettingLogRetentionDesc": "Bu süreden eski log kayıtları otomatik olarak temizlenir.",
+  "SettingLogRetention1h": "1 Saat",
+  "SettingLogRetention6h": "6 Saat",
+  "SettingLogRetention12h": "12 Saat",
+  "SettingLogRetention24h": "24 Saat",
+  "SettingLogRetention7d": "7 Gün",
+  "SettingLogRetention30d": "30 Gün",
+  "SettingLogRetentionNever": "Sınırsız",
+  "SettingClearLogs": "Logları Şimdi Temizle",
+  "SettingClearLogsDesc": "Tüm log kayıtlarını ve log dosyasını siler.",
+  "SettingReset": "Ayarları Sıfırla",
+  "SettingResetDesc": "Tüm ayarları varsayılan değerlere döndürür ve sayfayı yeniler.",
+  "SettingResetConfirm": "Tüm ayarlar sıfırlanacak. Emin misiniz?"
 }

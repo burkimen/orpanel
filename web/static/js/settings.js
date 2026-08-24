@@ -1,4 +1,5 @@
 const autoStartToggle = document.getElementById('autoStartToggle');
+const logRetentionSelect = document.getElementById('logRetention');
 
 async function checkAutoStart() {
     const res = await fetch('/api/autostart');
@@ -13,6 +14,35 @@ async function toggleAutoStart() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isEnabled })
     });
+}
+
+async function loadLogRetention() {
+    try {
+        const res = await fetch('/api/settings/log-retention');
+        const data = await res.json();
+        logRetentionSelect.value = data.hours;
+    } catch(e) {}
+}
+
+async function setLogRetention() {
+    const hours = parseInt(logRetentionSelect.value);
+    await fetch('/api/settings/log-retention', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hours })
+    });
+}
+
+async function clearLogs() {
+    if (!confirm(T.SettingResetConfirm)) return;
+    await fetch('/api/settings/clear-logs', { method: 'POST' });
+    location.reload();
+}
+
+async function resetSettings() {
+    if (!confirm(T.SettingResetConfirm)) return;
+    await fetch('/api/settings/reset', { method: 'POST' });
+    location.reload();
 }
 
 function toggleDropdown() {
@@ -55,3 +85,4 @@ async function changeLanguage(lang, text, flag) {
 
 checkAutoStart();
 loadSettings();
+loadLogRetention();

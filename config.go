@@ -13,9 +13,10 @@ const ThemeDark = "dark"
 const ThemeSystem = "system"
 
 type Config struct {
-	Language  string `json:"language"`
-	AutoStart bool   `json:"auto_start"`
-	Theme     string `json:"theme"`
+	Language          string `json:"language"`
+	AutoStart         bool   `json:"auto_start"`
+	Theme             string `json:"theme"`
+	LogRetentionHours int    `json:"log_retention_hours"`
 }
 
 func isValidTheme(t string) bool {
@@ -39,6 +40,9 @@ func loadConfigUnlocked() Config {
 	}
 	if !isValidTheme(cfg.Theme) {
 		cfg.Theme = ThemeSystem
+	}
+	if cfg.LogRetentionHours <= 0 {
+		cfg.LogRetentionHours = 24
 	}
 	if cfg.Language != "" {
 		currentLang = cfg.Language

@@ -82,5 +82,19 @@
   "HealthPortFreeShort": "Free",
   "HealthPortOccupiedShort": "Occupied",
   "HealthLabelUpdate": "Update",
-  "HealthLabelPort": "Port"
+  "HealthLabelPort": "Port",
+  "SettingLogRetention": "Log Retention",
+  "SettingLogRetentionDesc": "Log entries older than this are automatically cleaned.",
+  "SettingLogRetention1h": "1 Hour",
+  "SettingLogRetention6h": "6 Hours",
+  "SettingLogRetention12h": "12 Hours",
+  "SettingLogRetention24h": "24 Hours",
+  "SettingLogRetention7d": "7 Days",
+  "SettingLogRetention30d": "30 Days",
+  "SettingLogRetentionNever": "Unlimited",
+  "SettingClearLogs": "Clear Logs Now",
+  "SettingClearLogsDesc": "Deletes all log entries and the log file.",
+  "SettingReset": "Reset Settings",
+  "SettingResetDesc": "Resets all settings to defaults and reloads the page.",
+  "SettingResetConfirm": "All settings will be reset. Are you sure?"
 }

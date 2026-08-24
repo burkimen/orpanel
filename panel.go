@@ -247,6 +247,54 @@ func initFileLog() {
 	}
 }
 
+func cleanOldLogs() {
+	cfg := loadConfig()
+	hours := cfg.LogRetentionHours
+	if hours <= 0 {
+		return
+	}
+	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
+	logMutex.Lock()
+	defer logMutex.Unlock()
+	cleaned := 0
+	for len(logBuffer) > 0 {
+		line := logBuffer[0]
+		ts := parseLogTimestamp(line)
+		if !ts.IsZero() && ts.Before(cutoff) {
+			logBuffer = logBuffer[1:]
+			cleaned++
+		} else {
+			break
+		}
+	}
+	if cleaned > 0 {
+		fmt.Printf("  Log cleaned: %d entries older than %dh removed\n", cleaned, hours)
+	}
+}
+
+func parseLogTimestamp(line string) time.Time {
+	if len(line) < 21 {
+		return time.Time{}
+	}
+	if line[0] != '[' {
+		return time.Time{}
+	}
+	ts, err := time.Parse("2006-01-02 15:04:05", line[1:20])
+	if err != nil {
+		return time.Time{}
+	}
+	return ts
+}
+
+func startLogCleanup() {
+	go func() {
+		for {
+			time.Sleep(5 * time.Minute)
+			cleanOldLogs()
+		}
+	}()
+}
+
 func writeLog(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
 	timestamped := fmt.Sprintf("[%s] %s", time.Now().Format("2006-01-02 15:04:05"), msg)
@@ -697,10 +745,57 @@ func startWebServer() {
 		defer logMutex.Unlock()
 		data, err := os.ReadFile(getLogPath())
 		if err != nil {
-			w.Write([]byte("Henüz log dosyası oluşturulmadı."))
+			w.Write([]byte(""))
 			return
 		}
 		w.Write(data)
+	})
+
+	// Settings endpoints
+	http.HandleFunc("/api/settings/log-retention", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			var req struct {
+				Hours int `json:"hours"`
+			}
+			json.NewDecoder(r.Body).Decode(&req)
+			if req.Hours < 0 {
+				req.Hours = 0
+			}
+			configMutex.Lock()
+			cfg := loadConfigUnlocked()
+			cfg.LogRetentionHours = req.Hours
+			data, _ := json.MarshalIndent(cfg, "", "  ")
+			os.WriteFile(getConfigPath(), data, 0644)
+			configMutex.Unlock()
+			return
+		}
+		cfg := loadConfig()
+		json.NewEncoder(w).Encode(map[string]int{"hours": cfg.LogRetentionHours})
+	})
+
+	http.HandleFunc("/api/settings/clear-logs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		logMutex.Lock()
+		logBuffer = nil
+		logMutex.Unlock()
+		os.Remove(getLogPath())
+		initFileLog()
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+
+	http.HandleFunc("/api/settings/reset", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		defaultCfg := Config{Language: "", AutoStart: false, Theme: ThemeSystem, LogRetentionHours: 24}
+		data, _ := json.MarshalIndent(defaultCfg, "", "  ")
+		os.WriteFile(getConfigPath(), data, 0644)
+		currentLang = ""
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
 	log.Fatal(http.ListenAndServe(":20127", nil))
@@ -718,6 +813,7 @@ func updateTrayTexts() {
 func main() {
 	loadConfig()
 	initFileLog()
+	startLogCleanup()
 	tInit := loadTranslations(currentLang)
 	writeLog("%s", tInit["LogStarted"])
 
