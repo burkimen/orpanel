@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -53,9 +52,6 @@ func streamCmd(name string, args []string) error {
 }
 
 func npmCmd(args []string) []string {
-	if runtime.GOOS == "windows" {
-		return append([]string{"/c", "npm"}, args...)
-	}
 	return args
 }
 
@@ -75,12 +71,7 @@ func runNpmOmni(op string, args ...string) {
 	}()
 
 	writeLog("INFO: OmniRoute %s başlatılıyor: npm %s", op, strings.Join(args, " "))
-	var err error
-	if runtime.GOOS == "windows" {
-		err = streamCmd("cmd", npmCmd(args))
-	} else {
-		err = streamCmd("npm", args)
-	}
+	err := streamCmd("npm", args)
 	if err != nil {
 		writeLog("ERROR: npm %s başarısız: %v", strings.Join(args, " "), err)
 	} else {
@@ -163,19 +154,10 @@ func handleOmniReinstall(w http.ResponseWriter, r *http.Request) {
 		}()
 
 		writeLog("INFO: OmniRoute yeniden kurulum: uninstall")
-		if runtime.GOOS == "windows" {
-			streamCmd("cmd", npmCmd([]string{"uninstall", "-g", "omniroute"}))
-		} else {
-			streamCmd("npm", []string{"uninstall", "-g", "omniroute"})
-		}
+		streamCmd("npm", []string{"uninstall", "-g", "omniroute"})
 
 		writeLog("INFO: OmniRoute yeniden kurulum: install")
-		var err error
-		if runtime.GOOS == "windows" {
-			err = streamCmd("cmd", npmCmd([]string{"install", "-g", "omniroute@latest"}))
-		} else {
-			err = streamCmd("npm", []string{"install", "-g", "omniroute@latest"})
-		}
+		err := streamCmd("npm", []string{"install", "-g", "omniroute@latest"})
 		if err != nil {
 			writeLog("ERROR: reinstall başarısız: %v", err)
 		} else {

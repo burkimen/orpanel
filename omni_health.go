@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -112,12 +111,7 @@ func getOmniLatestVersion() string {
 		return latestCache
 	}
 	// npm view
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd", "/c", "npm", "view", "omniroute", "version")
-	} else {
-		cmd = exec.Command("npm", "view", "omniroute", "version")
-	}
+	cmd := exec.Command("npm", "view", "omniroute", "version")
 	hideWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
