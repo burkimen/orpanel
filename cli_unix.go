@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 )
 
 func spawnDetached() {
@@ -29,3 +30,9 @@ func spawnDetached() {
 
 // hideConsole no-op on unix (no console window concept)
 func hideConsole() {}
+
+func relaunchAttrs() *syscall.SysProcAttr {
+	return &syscall.SysProcAttr{
+		Setsid: true,
+	}
+}

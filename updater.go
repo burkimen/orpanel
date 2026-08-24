@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -162,17 +161,9 @@ func performUpdate() error {
 	}()
 
 	// Relaunch
-	if runtime.GOOS == "windows" {
-		cmd := exec.Command(exe, "--tray")
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			CreationFlags: 0x00000008 | 0x00000200,
-			HideWindow:    true,
-		}
-		cmd.Start()
-	} else {
-		cmd := exec.Command(exe, "--tray")
-		cmd.Start()
-	}
+	relaunchCmd := exec.Command(exe, "--tray")
+	relaunchCmd.SysProcAttr = relaunchAttrs()
+	relaunchCmd.Start()
 
 	return nil
 }

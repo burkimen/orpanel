@@ -41,3 +41,10 @@ func hideConsole() {
 		showWindow.Call(hwnd, 0) // SW_HIDE
 	}
 }
+
+func relaunchAttrs() *syscall.SysProcAttr {
+	return &syscall.SysProcAttr{
+		CreationFlags: 0x00000008 | 0x00000200,
+		HideWindow:    true,
+	}
+}
