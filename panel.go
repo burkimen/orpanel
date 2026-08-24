@@ -798,6 +798,10 @@ func startWebServer() {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
+	// Update endpoints
+	http.HandleFunc("/api/update/check", handleCheckUpdate)
+	http.HandleFunc("/api/update/install", handlePerformUpdate)
+
 	log.Fatal(http.ListenAndServe(":20127", nil))
 }
 
@@ -829,6 +833,7 @@ func main() {
 			fmt.Println("  Options:")
 			fmt.Println("    --web      Open web UI in browser")
 			fmt.Println("    --tray     Start in system tray (background)")
+			fmt.Println("    --update   Check and install updates")
 			fmt.Println("    --version  Show version")
 			fmt.Println("    --help     Show this help")
 			fmt.Println()
@@ -848,6 +853,20 @@ func main() {
 			startWatchdog()
 			go startWebServer()
 			systray.Run(onReady, onExit)
+			return
+		case "--update":
+			info := checkForUpdate()
+			if !info.UpdateAvailable {
+				fmt.Printf("Zaten güncel: v%s\n", info.CurrentVersion)
+				return
+			}
+			fmt.Printf("Güncelleme mevcut: v%s → v%s\n", info.CurrentVersion, info.LatestVersion)
+			fmt.Println("İndiriliyor...")
+			if err := performUpdate(); err != nil {
+				fmt.Printf("Hata: %v\n", err)
+				return
+			}
+			fmt.Println("Güncelleme tamamlandı!")
 			return
 		}
 	}
