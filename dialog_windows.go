@@ -15,7 +15,7 @@ func showConfirmDialog(title, message string) bool {
 		message, title,
 	)
 	cmd := exec.Command("powershell", "-NoProfile", "-Command", psCommand)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
 	output, err := cmd.Output()
 	if err == nil {
 		res := strings.TrimSpace(string(output))
@@ -25,7 +25,7 @@ func showConfirmDialog(title, message string) bool {
 }
 
 func hideWindow(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000} // CREATE_NO_WINDOW
 }
 
 func configureStartCmd(cmd *exec.Cmd) {
