@@ -96,5 +96,13 @@
   "SettingClearLogsDesc": "Elimina todas las entradas de log y el archivo de log.",
   "SettingReset": "Restablecer Configuración",
   "SettingResetDesc": "Restablece todas las configuraciones a los valores predeterminados y recarga la página.",
-  "SettingResetConfirm": "Todas las configuraciones se restablecerán. ¿Estás seguro?"
+  "SettingResetConfirm": "Todas las configuraciones se restablecerán. ¿Estás seguro?",
+  "SettingUpdate": "Actualización",
+  "SettingUpdateCheck": "Buscar actualizaciones",
+  "SettingUpdating": "Actualizando...",
+  "SettingUpToDate": "Ya está actualizado",
+  "SettingUpdateAvail": "Actualización disponible",
+  "SettingUpdateDone": "¡Actualización completada!",
+  "SettingUpdateFailed": "Fallo en la actualización",
+  "SettingUpdateNow": "Actualizar Ahora"
 }

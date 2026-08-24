@@ -96,5 +96,13 @@
   "SettingClearLogsDesc": "Tüm log kayıtlarını ve log dosyasını siler.",
   "SettingReset": "Ayarları Sıfırla",
   "SettingResetDesc": "Tüm ayarları varsayılan değerlere döndürür ve sayfayı yeniler.",
-  "SettingResetConfirm": "Tüm ayarlar sıfırlanacak. Emin misiniz?"
+  "SettingResetConfirm": "Tüm ayarlar sıfırlanacak. Emin misiniz?",
+  "SettingUpdate": "Güncelleme Kontrolü",
+  "SettingUpdateCheck": "Güncellemeyi kontrol et",
+  "SettingUpdating": "Güncelleniyor...",
+  "SettingUpToDate": "Zaten güncel",
+  "SettingUpdateAvail": "Güncelleme mevcut",
+  "SettingUpdateDone": "Güncelleme tamamlandı!",
+  "SettingUpdateFailed": "Güncelleme başarısız",
+  "SettingUpdateNow": "Şimdi Güncelle"
 }

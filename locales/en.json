@@ -96,5 +96,13 @@
   "SettingClearLogsDesc": "Deletes all log entries and the log file.",
   "SettingReset": "Reset Settings",
   "SettingResetDesc": "Resets all settings to defaults and reloads the page.",
-  "SettingResetConfirm": "All settings will be reset. Are you sure?"
+  "SettingResetConfirm": "All settings will be reset. Are you sure?",
+  "SettingUpdate": "Update Check",
+  "SettingUpdateCheck": "Check for updates",
+  "SettingUpdating": "Updating...",
+  "SettingUpToDate": "Already up to date",
+  "SettingUpdateAvail": "Update available",
+  "SettingUpdateDone": "Update completed!",
+  "SettingUpdateFailed": "Update failed",
+  "SettingUpdateNow": "Update Now"
 }

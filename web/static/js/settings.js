@@ -83,6 +83,36 @@ async function changeLanguage(lang, text, flag) {
     location.reload();
 }
 
+async function checkAndUpdate() {
+    const btn = document.getElementById('updateBtn');
+    const info = document.getElementById('updateInfo');
+    btn.disabled = true;
+    info.textContent = T.SettingUpdating;
+
+    try {
+        const res = await fetch('/api/update/check');
+        const data = await res.json();
+        if (!data.updateAvailable) {
+            info.textContent = T.SettingUpToDate + ' (v' + data.currentVersion + ')';
+            btn.disabled = false;
+            return;
+        }
+        info.textContent = T.SettingUpdateAvail + ': v' + data.currentVersion + ' → v' + data.latestVersion;
+        btn.innerHTML = '<span class="material-symbols-rounded">system_update</span> ' + T.SettingUpdateNow;
+        btn.disabled = false;
+        btn.onclick = async function() {
+            btn.disabled = true;
+            info.textContent = T.SettingUpdating;
+            await fetch('/api/update/install', { method: 'POST' });
+            info.textContent = T.SettingUpdateDone;
+            setTimeout(() => location.reload(), 2000);
+        };
+    } catch(e) {
+        info.textContent = T.SettingUpdateFailed;
+        btn.disabled = false;
+    }
+}
+
 checkAutoStart();
 loadSettings();
 loadLogRetention();
