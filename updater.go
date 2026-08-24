@@ -49,6 +49,11 @@ func getDownloadURL(version string) string {
 	osName := runtime.GOOS
 	arch := runtime.GOARCH
 
+	// Normalize arch: amd64 -> x64 (Go uses amd64, binaries use x64)
+	if arch == "amd64" {
+		arch = "x64"
+	}
+
 	var assetName string
 	switch osName {
 	case "windows":
