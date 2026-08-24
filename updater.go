@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -33,12 +34,8 @@ func getLatestReleaseInfo() (string, string, error) {
 	defer resp.Body.Close()
 
 	var release struct {
-		TagName    string `json:"tag_name"`
-		Body       string `json:"body"`
-		Assets     []struct {
-			Name string `json:"name"`
-			URL  string `json:"browser_download_url"`
-		} `json:"assets"`
+		TagName string `json:"tag_name"`
+		Body    string `json:"body"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
 		return "", "", err
@@ -63,6 +60,17 @@ func getDownloadURL(version string) string {
 	}
 
 	return fmt.Sprintf("https://github.com/burkimen/orpanel/releases/download/v%s/%s", version, assetName)
+}
+
+func getUpdateDir() string {
+	if runtime.GOOS == "windows" {
+		appData := os.Getenv("LOCALAPPDATA")
+		if appData == "" {
+			appData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local")
+		}
+		return filepath.Join(appData, "Orpanel", "update")
+	}
+	return filepath.Join(os.TempDir(), "orpanel-update")
 }
 
 func checkForUpdate() UpdateInfo {
@@ -105,12 +113,10 @@ func performUpdate() error {
 	writeLog("INFO: Güncelleme v%s → v%s indiriliyor", current, latest)
 
 	exe, _ := os.Executable()
-	newPath := exe + ".new"
-	oldPath := exe + ".old"
+	updateDir := getUpdateDir()
+	os.MkdirAll(updateDir, 0755)
 
-	// Cleanup previous attempt
-	os.Remove(newPath)
-	os.Remove(oldPath)
+	newExe := filepath.Join(updateDir, filepath.Base(exe))
 
 	// Download new binary
 	client := &http.Client{Timeout: 120 * time.Second}
@@ -124,47 +130,50 @@ func performUpdate() error {
 		return fmt.Errorf("indirme başarısız: HTTP %d", resp.StatusCode)
 	}
 
-	outFile, err := os.Create(newPath)
+	outFile, err := os.Create(newExe)
 	if err != nil {
 		return fmt.Errorf("dosya oluşturulamadı: %v", err)
 	}
 	written, err := io.Copy(outFile, resp.Body)
 	outFile.Close()
 	if err != nil {
-		os.Remove(newPath)
+		os.Remove(newExe)
 		return fmt.Errorf("indirme başarısız: %v", err)
 	}
 	writeLog("INFO: İndirildi: %.1f MB", float64(written)/(1024*1024))
 
 	// Make executable on unix
 	if runtime.GOOS != "windows" {
-		os.Chmod(newPath, 0755)
+		os.Chmod(newExe, 0755)
 	}
 
-	// Replace binary: rename current → .old, new → current
-	// This works even while current process is running (OS keeps old handle)
-	if err := os.Rename(exe, oldPath); err != nil {
-		os.Remove(newPath)
-		return fmt.Errorf("mevcut binary yeniden adlandırılamadı: %v", err)
+	writeLog("SUCCESS: v%s → v%s güncelleniyor, yeniden başlatılıyor...", current, latest)
+
+	if runtime.GOOS == "windows" {
+		// Windows: batch script ile güncelleme
+		applyScript := filepath.Join(updateDir, "apply_update.bat")
+		batContent := fmt.Sprintf(`@echo off
+timeout /t 2 /nobreak >nul
+copy /Y "%s" "%s"
+del "%s"
+start "" "%s" --tray
+`, newExe, exe, newExe, exe)
+		os.WriteFile(applyScript, []byte(batContent), 0644)
+
+		cmd := exec.Command("cmd", "/c", applyScript)
+		cmd.SysProcAttr = relaunchAttrs()
+		cmd.Start()
+	} else {
+		// Unix: rename çalışır
+		os.Rename(newExe, exe)
+		cmd := exec.Command(exe, "--tray")
+		cmd.SysProcAttr = relaunchAttrs()
+		cmd.Start()
 	}
-	if err := os.Rename(newPath, exe); err != nil {
-		os.Rename(oldPath, exe) // rollback
-		return fmt.Errorf("yeni binary yerleştirilemedi: %v", err)
-	}
 
-	writeLog("SUCCESS: v%s → v%s güncellendi. Yeniden başlatılıyor...", current, latest)
-
-	// Cleanup old binary after a short delay (will be in use briefly)
-	go func() {
-		time.Sleep(2 * time.Second)
-		os.Remove(oldPath)
-	}()
-
-	// Relaunch
-	relaunchCmd := exec.Command(exe, "--tray")
-	relaunchCmd.SysProcAttr = relaunchAttrs()
-	relaunchCmd.Start()
-
+	// Exit current process
+	time.Sleep(500 * time.Millisecond)
+	os.Exit(0)
 	return nil
 }
 
