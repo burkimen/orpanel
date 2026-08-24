@@ -1,15 +1,12 @@
 #!/bin/sh
 # orpanel installer - curl | sh
-# Standartlara uygun: XDG Base Directory, ~/.local/bin, yetkisiz kurulum
 # Tek komut: curl -fsSL https://get.orpanel.dev/install.sh | sh
-# veya: curl -fsSL https://raw.githubusercontent.com/burkimen/orpanel/main/scripts/install/install.sh | sh
 set -e
 
 REPO="burkimen/orpanel"
 BIN_NAME="orpanel"
 VERSION="${ORPANEL_VERSION:-latest}"
 
-# XDG
 XDG_BIN_HOME="${XDG_BIN_HOME:-$HOME/.local/bin}"
 XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
@@ -20,11 +17,11 @@ CONFIG_DIR="$XDG_CONFIG_HOME/orpanel"
 DATA_DIR="$XDG_DATA_HOME/orpanel"
 STATE_DIR="$XDG_STATE_HOME/orpanel"
 
-# Detect OS/arch
+# Detect platform
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
 case "$OS" in
-  linux) OS="linux" ;;
+  linux)  OS="linux" ;;
   darwin) OS="darwin" ;;
   *) echo "Desteklenmeyen OS: $OS" >&2; exit 1 ;;
 esac
@@ -36,24 +33,19 @@ esac
 
 # Resolve version
 if [ "$VERSION" = "latest" ]; then
-  echo "→ En son sürüm sorgulanıyor..."
-  # GitHub API'den latest tag al (curl/wget fallback)
+  echo "→ En son surum sorgulaniyor..."
   if command -v curl >/dev/null 2>&1; then
-    TAG="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '\"tag_name\"' | sed -E 's/.*\"v?([^"]+)\".*/\1/' | head -n1)"
+    TAG="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/' | head -n1)"
   elif command -v wget >/dev/null 2>&1; then
-    TAG="$(wget -qO- "https://api.github.com/repos/$REPO/releases/latest" | grep '\"tag_name\"' | sed -E 's/.*\"v?([^"]+)\".*/\1/' | head -n1)"
-  else
-    TAG=""
+    TAG="$(wget -qO- "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/' | head -n1)"
   fi
-  if [ -z "$TAG" ]; then TAG="1.0.0"; fi
+  if [ -z "$TAG" ]; then TAG="1.0.9"; fi
   VERSION="$TAG"
 fi
 
 VERSION_NOV="${VERSION#v}"
-ASSET="orpanel-v${VERSION_NOV}-${OS}-${ARCH}.tar.gz"
-URL="https://github.com/${REPO}/releases/download/v${VERSION_NOV}/${ASSET}"
-# Fallback to raw dist if release yoksa
-FALLBACK_URL="https://raw.githubusercontent.com/${REPO}/main/dist/${ASSET}"
+BIN_NAME_REMOTE="orpanel-${OS}-${ARCH}"
+URL="https://github.com/${REPO}/releases/download/v${VERSION_NOV}/${BIN_NAME_REMOTE}"
 
 echo "→ Orpanel v${VERSION_NOV} (${OS}/${ARCH}) indiriliyor..."
 echo "  $URL"
@@ -61,87 +53,43 @@ echo "  $URL"
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
-# Download with curl or wget
+# Download binary
+DOWNLOADED=0
 if command -v curl >/dev/null 2>&1; then
-  if ! curl -fsSL "$URL" -o "$TMPDIR/$ASSET"; then
-    echo "  Release bulunamadı, fallback deneniyor..."
-    curl -fsSL "$FALLBACK_URL" -o "$TMPDIR/$ASSET" || { echo "İndirme başarısız" >&2; exit 1; }
-  fi
+  if curl -fsSL "$URL" -o "$TMPDIR/$BIN_NAME_REMOTE"; then DOWNLOADED=1; fi
 elif command -v wget >/dev/null 2>&1; then
-  if ! wget -qO "$TMPDIR/$ASSET" "$URL"; then
-    wget -qO "$TMPDIR/$ASSET" "$FALLBACK_URL" || { echo "İndirme başarısız" >&2; exit 1; }
-  fi
+  if wget -qO "$TMPDIR/$BIN_NAME_REMOTE" "$URL"; then DOWNLOADED=1; fi
 else
   echo "curl veya wget gerekli" >&2; exit 1
 fi
 
-# Extract
-mkdir -p "$TMPDIR/extract"
-tar -xzf "$TMPDIR/$ASSET" -C "$TMPDIR/extract"
-
-# Find binary in extract (may be orPanel / orpanel)
-BIN_SRC=""
-for cand in "$TMPDIR/extract/orpanel" "$TMPDIR/extract/orPanel" "$TMPDIR/extract/orpanel-${OS}-${ARCH}" "$TMPDIR/extract/orPanel-${OS}-${ARCH}"; do
-  if [ -f "$cand" ]; then BIN_SRC="$cand"; break; fi
-  if [ -f "$cand.tar" ]; then BIN_SRC="$cand.tar"; break; fi
-done
-if [ -z "$BIN_SRC" ]; then
-  # fallback: first executable file
-  BIN_SRC="$(find "$TMPDIR/extract" -type f -name "orpanel*" | head -n1)"
-fi
-if [ ! -f "$BIN_SRC" ]; then
-  echo "  Binary indirilemedi. Kaynaktan derleniyor..."
+if [ "$DOWNLOADED" -eq 0 ]; then
+  echo "Binary indirilemedi. Kaynaktan derleniyor..."
   if command -v go >/dev/null 2>&1; then
     REPO_DIR="$(mktemp -d)"
-    trap 'rm -rf "$REPO_DIR"' EXIT
-    echo "  Repozitori klonlaniyor..."
-    git clone --depth 1 "https://github.com/${REPO}.git" "$REPO_DIR"
+    trap 'rm -rf "$REPO_DIR" "$TMPDIR"' EXIT
+    git clone --depth 1 "https://github.com/$REPO.git" "$REPO_DIR"
     cd "$REPO_DIR"
-    echo "  Derleniyor..."
-    CGO_ENABLED=1 go build -o "$BIN_SRC"
-    if [ ! -f "$BIN_SRC" ]; then
-      echo "Derleme basarisiz. Go 1.22+ gerekli." >&2; exit 1
+    VERSION_STR="$(cat version.txt 2>/dev/null || echo '0.0.0')"
+    CGO_ENABLED=1 go build -ldflags "-X main.AppVersion=$VERSION_STR" -o "$TMPDIR/$BIN_NAME_REMOTE"
+    if [ ! -f "$TMPDIR/$BIN_NAME_REMOTE" ]; then
+      echo "Derleme basarisiz. Go 1.23+ gerekli." >&2; exit 1
     fi
   else
-    echo "Binary bulunamadi ve Go yuklu degil." >&2
+    echo "Binary indirilemedi ve Go yuklu degil." >&2
     echo "Go yukleyin: https://go.dev/dl/" >&2
-    echo "Veya: npm install -g orpanel" >&2
     exit 1
   fi
 fi
 
 # Install
+chmod +x "$TMPDIR/$BIN_NAME_REMOTE"
 mkdir -p "$XDG_BIN_HOME" "$CONFIG_DIR" "$DATA_DIR" "$STATE_DIR"
-install -m 755 "$BIN_SRC" "$INSTALL_BIN" 2>/dev/null || cp -f "$BIN_SRC" "$INSTALL_BIN" && chmod +x "$INSTALL_BIN"
-
-# Copy themes/locales if present in archive
-for d in themes locales; do
-  if [ -d "$TMPDIR/extract/$d" ]; then
-    rm -rf "$DATA_DIR/$d"
-    cp -R "$TMPDIR/extract/$d" "$DATA_DIR/"
-    # also keep alongside binary for exeDir fallback
-    cp -R "$TMPDIR/extract/$d" "$(dirname "$INSTALL_BIN")/" 2>/dev/null || true
-  fi
-done
-for f in app.ico icon.png; do
-  if [ -f "$TMPDIR/extract/$f" ]; then
-    cp -f "$TMPDIR/extract/$f" "$(dirname "$INSTALL_BIN")/" 2>/dev/null || true
-    cp -f "$TMPDIR/extract/$f" "$DATA_DIR/" 2>/dev/null || true
-  fi
-done
-
-echo "✓ Kuruldu: $INSTALL_BIN"
-echo "  Config: $CONFIG_DIR/config.json"
-echo "  Log:    $STATE_DIR/panel.log"
-echo "  Data:   $DATA_DIR"
-
-# PATH check
-case ":$PATH:" in
-  *":$XDG_BIN_HOME:"*) ;;
-  *) echo ""; echo "→ PATH'e ekleyin: export PATH=\"\$XDG_BIN_HOME:\$PATH\"  ( ~/.profile veya ~/.zshrc )"; echo "  Şimdi için: export PATH=\"$XDG_BIN_HOME:\$PATH\"";;
-esac
+cp -f "$TMPDIR/$BIN_NAME_REMOTE" "$INSTALL_BIN"
 
 echo ""
-echo "Çalıştır: orpanel   (veya: $INSTALL_BIN)"
-echo "Güncelle: curl -fsSL https://get.orpanel.dev/install.sh | sh   veya   orpanel update"
-echo "Kaldır:   rm \"$INSTALL_BIN\" && rm -rf \"$CONFIG_DIR\" \"$DATA_DIR\""
+echo "Kuruldu: $INSTALL_BIN"
+echo ""
+echo "Calistir: orpanel"
+echo "Guncelle: curl -fsSL https://raw.githubusercontent.com/$REPO/main/scripts/install/install.sh | sh"
+echo "Kaldir:   rm $INSTALL_BIN && rm -rf $CONFIG_DIR $DATA_DIR $STATE_DIR"
