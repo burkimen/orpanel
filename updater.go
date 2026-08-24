@@ -55,9 +55,9 @@ func getDownloadURL(version string) string {
 	var assetName string
 	switch osName {
 	case "windows":
-		assetName = fmt.Sprintf("orpanel-%s-%s.exe", osName, arch)
+		assetName = fmt.Sprintf("orpanel-win32-%s.exe", arch)
 	case "darwin":
-		assetName = fmt.Sprintf("orpanel-%s-%s", osName, arch)
+		assetName = fmt.Sprintf("orpanel-darwin-%s", arch)
 	default:
 		assetName = fmt.Sprintf("orpanel-%s-%s", osName, arch)
 	}
