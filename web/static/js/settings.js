@@ -36,13 +36,15 @@ async function setLogRetention() {
 async function clearLogs() {
     if (!confirm(T.SettingResetConfirm)) return;
     await fetch('/api/settings/clear-logs', { method: 'POST' });
-    location.reload();
+    showToast(T.SettingClearLogs, 'ok');
+    setTimeout(() => location.reload(), 1000);
 }
 
 async function resetSettings() {
     if (!confirm(T.SettingResetConfirm)) return;
     await fetch('/api/settings/reset', { method: 'POST' });
-    location.reload();
+    showToast(T.SettingReset, 'warn');
+    setTimeout(() => location.reload(), 1000);
 }
 
 function toggleDropdown() {
@@ -87,7 +89,7 @@ async function checkAndUpdate() {
     const btn = document.getElementById('updateBtn');
     const info = document.getElementById('updateInfo');
     btn.disabled = true;
-    info.textContent = T.SettingUpdating;
+    showToast(T.SettingUpdating, 'info');
 
     try {
         const res = await fetch('/api/update/check');
@@ -95,21 +97,30 @@ async function checkAndUpdate() {
         if (!data.updateAvailable) {
             info.textContent = T.SettingUpToDate + ' (v' + data.currentVersion + ')';
             btn.disabled = false;
+            showToast(T.SettingUpToDate + ' v' + data.currentVersion, 'ok');
             return;
         }
         info.textContent = T.SettingUpdateAvail + ': v' + data.currentVersion + ' → v' + data.latestVersion;
-        btn.innerHTML = '<span class="material-symbols-rounded">system_update</span> ' + T.SettingUpdateNow;
+        showToast(T.SettingUpdateAvail + ': v' + data.latestVersion + ' mevcut', 'warn');
+        btn.innerHTML = '<span class="material-symbols-rounded">download</span> ' + T.SettingUpdateNow;
         btn.disabled = false;
         btn.onclick = async function() {
             btn.disabled = true;
-            info.textContent = T.SettingUpdating;
-            await fetch('/api/update/install', { method: 'POST' });
-            info.textContent = T.SettingUpdateDone;
-            setTimeout(() => location.reload(), 2000);
+            btn.innerHTML = '<span class="material-symbols-rounded">hourglass_top</span> ' + T.SettingUpdating;
+            showToast(T.SettingUpdating, 'info', 60000);
+            try {
+                await fetch('/api/update/install', { method: 'POST' });
+                showToast(T.SettingUpdateDone, 'ok');
+                setTimeout(() => location.reload(), 3000);
+            } catch(e) {
+                showToast(T.SettingUpdateFailed, 'error');
+                btn.disabled = false;
+            }
         };
     } catch(e) {
         info.textContent = T.SettingUpdateFailed;
         btn.disabled = false;
+        showToast(T.SettingUpdateFailed, 'error');
     }
 }
 

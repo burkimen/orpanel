@@ -6,8 +6,10 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -97,17 +99,21 @@ func performUpdate() error {
 	}
 
 	if !isVersionLess(current, latest) {
-		return fmt.Errorf("zaten güncel sürümdesiniz: %s", current)
+		return fmt.Errorf("zaten güncel: v%s", current)
 	}
 
 	downloadURL := getDownloadURL(latest)
-	writeLog("INFO: Güncelleme başlatılıyor v%s → v%s", current, latest)
-	writeLog("INFO: İndiriliyor: %s", downloadURL)
+	writeLog("INFO: Güncelleme v%s → v%s indiriliyor", current, latest)
 
 	exe, _ := os.Executable()
-	tmpPath := exe + ".update.tmp"
+	newPath := exe + ".new"
+	oldPath := exe + ".old"
 
-	// Download
+	// Cleanup previous attempt
+	os.Remove(newPath)
+	os.Remove(oldPath)
+
+	// Download new binary
 	client := &http.Client{Timeout: 120 * time.Second}
 	resp, err := client.Get(downloadURL)
 	if err != nil {
@@ -119,39 +125,55 @@ func performUpdate() error {
 		return fmt.Errorf("indirme başarısız: HTTP %d", resp.StatusCode)
 	}
 
-	outFile, err := os.Create(tmpPath)
+	outFile, err := os.Create(newPath)
 	if err != nil {
 		return fmt.Errorf("dosya oluşturulamadı: %v", err)
 	}
 	written, err := io.Copy(outFile, resp.Body)
 	outFile.Close()
 	if err != nil {
-		os.Remove(tmpPath)
+		os.Remove(newPath)
 		return fmt.Errorf("indirme başarısız: %v", err)
 	}
 	writeLog("INFO: İndirildi: %.1f MB", float64(written)/(1024*1024))
 
 	// Make executable on unix
 	if runtime.GOOS != "windows" {
-		os.Chmod(tmpPath, 0755)
+		os.Chmod(newPath, 0755)
 	}
 
-	// Replace current binary
-	if err := os.Rename(tmpPath, exe); err != nil {
-		// Windows: rename fails if file is locked, try copy
-		if runtime.GOOS == "windows" {
-			data, readErr := os.ReadFile(tmpPath)
-			if readErr != nil {
-				return fmt.Errorf("yedekleme başarısız: %v", readErr)
-			}
-			os.WriteFile(exe, data, 0755)
-			os.Remove(tmpPath)
-		} else {
-			return fmt.Errorf("binary değiştirilemedi: %v", err)
+	// Replace binary: rename current → .old, new → current
+	// This works even while current process is running (OS keeps old handle)
+	if err := os.Rename(exe, oldPath); err != nil {
+		os.Remove(newPath)
+		return fmt.Errorf("mevcut binary yeniden adlandırılamadı: %v", err)
+	}
+	if err := os.Rename(newPath, exe); err != nil {
+		os.Rename(oldPath, exe) // rollback
+		return fmt.Errorf("yeni binary yerleştirilemedi: %v", err)
+	}
+
+	writeLog("SUCCESS: v%s → v%s güncellendi. Yeniden başlatılıyor...", current, latest)
+
+	// Cleanup old binary after a short delay (will be in use briefly)
+	go func() {
+		time.Sleep(2 * time.Second)
+		os.Remove(oldPath)
+	}()
+
+	// Relaunch
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command(exe, "--tray")
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			CreationFlags: 0x00000008 | 0x00000200,
+			HideWindow:    true,
 		}
+		cmd.Start()
+	} else {
+		cmd := exec.Command(exe, "--tray")
+		cmd.Start()
 	}
 
-	writeLog("SUCCESS: Güncelleme tamamlandı: v%s → v%s", current, latest)
 	return nil
 }
 
