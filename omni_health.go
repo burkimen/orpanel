@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -111,7 +112,12 @@ func getOmniLatestVersion() string {
 		return latestCache
 	}
 	// npm view
-	cmd := exec.Command("npm", "view", "omniroute", "version")
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", "npm view omniroute version")
+	} else {
+		cmd = exec.Command("npm", "view", "omniroute", "version")
+	}
 	hideWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {

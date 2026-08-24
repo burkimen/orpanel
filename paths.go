@@ -185,15 +185,31 @@ func getNpmPrefix() string {
 	if cachedNpmPrefix != "" && time.Since(cachedNpmPrefixTime) < 5*time.Minute {
 		return cachedNpmPrefix
 	}
-	cmd := exec.Command("npm", "prefix", "-g")
-	hideWindow(cmd)
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
+	// Find npm binary in PATH and derive prefix from its location
+	// This avoids spawning npm as a subprocess
+	var npmBin string
+	if runtime.GOOS == "windows" {
+		npmBin, _ = exec.LookPath("npm.cmd")
+	} else {
+		npmBin, _ = exec.LookPath("npm")
 	}
-	cachedNpmPrefix = strings.TrimSpace(string(out))
-	cachedNpmPrefixTime = time.Now()
-	return cachedNpmPrefix
+	if npmBin != "" {
+		// npm binary is at <prefix>/npm.cmd or <prefix>/bin/npm
+		dir := filepath.Dir(npmBin)
+		prefix := dir
+		// If in a bin/ subdirectory, go up
+		if filepath.Base(dir) == "bin" || filepath.Base(dir) == "node_modules" {
+			prefix = filepath.Dir(dir)
+		}
+		// If prefix itself looks like a node_modules path, go up to the real prefix
+		for strings.Contains(prefix, "node_modules") {
+			prefix = filepath.Dir(prefix)
+		}
+		cachedNpmPrefix = prefix
+		cachedNpmPrefixTime = time.Now()
+		return cachedNpmPrefix
+	}
+	return ""
 }
 
 func isOmnirouteDir(p string) bool {
