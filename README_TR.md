@@ -1,8 +1,8 @@
 # OmniRoute Kontrol Paneli (orPanel)
 
-[OmniRoute](https://github.com/TorhunORG/OmniRoute) icin capraz platform masaustu kontrol paneli — AI istek yonlendiricisi ve load balancer. orPanel sistem tepsisinde calisir, yerlesik terminal, saglik izleme ve OmniRoute icin tek tikla kurulum/guncelleme sunar.
+[OmniRoute](https://github.com/TorhunORG/OmniRoute) için çapraz platform masaüstü kontrol paneli — AI istek yönlendiricisi ve load balancer. orPanel sistem tepsisinde çalışır, yerleşik terminal, sağlık izleme ve OmniRoute için tek tıkla kurulum/güncelleme sunar.
 
-> OmniRoute toplulugu icin ❤️ ile yapildi.
+> OmniRoute topluluğu için ❤️ ile yapıldı.
 
 <p align="center">
   <img src="./screenshot.png" alt="orPanel Durum" width="100%">
@@ -12,15 +12,15 @@
   <img src="./screenshot_settings.png" alt="orPanel Ayarlar" width="100%">
 </p>
 
-## Ozellikler
+## Özellikler
 
-- **Sistem Tepsisi** — Gorev cubugundan her an erisilebilir
-- **Yerlesik Terminal** — VS Code tarzi yeniden boyutlandirilabilir alt panel
-- **Saglik Izleme** — Gercek zamanli OmniRoute durumu, surum kontrolu, tek tikla kurulum/guncelleme/onarim
-- **Tema Sistemi** — Acik, Koyu, Sistem (otomatik algilama)
-- **Coklu Dil** — Turkce, Ingilizce, Ispanyolca (genisletilebilir)
-- **Capraz Platform** — Windows, macOS, Linux
-- **Bagimlik gerektirmez** — Tek dosya, her sey icinde gomulu
+- **Sistem Tepsisi** — Görev çubuğundan her an erişilebilir
+- **Yerleşik Terminal** — VS Code tarzı yeniden boyutlandırılabilir alt panel
+- **Sağlık İzleme** — Gerçek zamanlı OmniRoute durumu, sürüm kontrolü, tek tıkla kurulum/güncelleme/onarım
+- **Tema Sistemi** — Açık, Koyu, Sistem (otomatik algılama)
+- **Çoklu Dil** — Türkçe, İngilizce, İspanyolca (genişletilebilir)
+- **Çapraz Platform** — Windows, macOS, Linux
+- **Bağımlılık gerektirmez** — Tek dosya, her şey içinde gömülü
 
 ## Kurulum
 
@@ -36,11 +36,11 @@ curl -fsSL https://raw.githubusercontent.com/burkimen/orpanel/main/scripts/insta
 irm https://raw.githubusercontent.com/burkimen/orpanel/main/scripts/install/install.ps1 | iex
 ```
 
-### Guncelleme
+### Güncelleme
 
-Ayni komutu tekrar calistir — en son surumu otomatik indirir.
+Aynı komutu tekrar çalıştır — en son sürümü otomatik indirir.
 
-### Kaldirma
+### Kaldırma
 
 ```bash
 # Linux/macOS
@@ -50,36 +50,36 @@ rm ~/.local/bin/orpanel
 Remove-Item "$env:LOCALAPPDATA\Programs\Orpanel\orPanel.exe"
 ```
 
-## Kullanim
+## Kullanım
 
 ```bash
-orpanel              # Interaktif CLI menusu
-orpanel --web        # Web UI'yi tarayicida ac
-orpanel --tray       # Sistem tepsisinde baslat
-orpanel --version    # Surumu goster
-orpanel --help       # Yardimi goster
+orpanel              # Etkileşimli CLI menüsü
+orpanel --web        # Web UI'yi tarayıcıda aç
+orpanel --tray       # Sistem tepsisinde başlat
+orpanel --version    # Sürümü göster
+orpanel --help       # Yardımı göster
 ```
 
-## Hizli Baslangic
+## Hızlı Başlangıç
 
-Tarayicinizda `http://localhost:20127` adresini acin. Panel sunlari yapar:
+Tarayıcınızda `http://localhost:20127` adresini açın. Panel şunları yapar:
 
-1. Sisteminizdeki OmniRoute'u algilar
-2. Surum bilgisiyle saglik durumunu gosterir
-3. OmniRoute kurulmadisa tek tikla kurulum onerir
-4. Yerlesik terminalde OmniRoute loglarini gosterir
+1. Sisteminizdeki OmniRoute'u algılar
+2. Sürüm bilgisiyle sağlık durumunu gösterir
+3. OmniRoute kurulu değilse tek tıkla kurulum önerir
+4. Yerleşik terminalde OmniRoute loglarını gösterir
 
 ## OmniRoute Entegrasyonu
 
-orPanel [OmniRoute](https://github.com/TorhunORG/OmniRoute) ile sorunsuz calisir:
+orPanel [OmniRoute](https://github.com/TorhunORG/OmniRoute) ile sorunsuz çalışır:
 
-- **Otomatik algilama** — `npm prefix -g`, NVM, sistem yollarindan OmniRoute'u bulur
-- **Saglik kontrolu** — `GET /api/omni/health` surum, port, node uyumlulugu izler
-- **Tek tikla islemler** — Web arayuzunden Kur, Guncelle, Onar, Yeniden Kur
-- **Yerlesik terminal** — npm ciktisi yerlesik xterm'e aker
-- **Surum takibi** — Yerel vs npm registry son surum karsilastirmasi, guncelleme uyarisi
+- **Otomatik algılama** — `npm prefix -g`, NVM, sistem yollarından OmniRoute'u bulur
+- **Sağlık kontrolü** — `GET /api/omni/health` sürüm, port, node uyumluluğu izler
+- **Tek tıkla işlemler** — Web arayüzünden Kur, Güncelle, Onar, Yeniden Kur
+- **Yerleşik terminal** — npm çıktısı yerleşik xterm'e akar
+- **Sürüm takibi** — Yerel vs npm registry son sürüm karşılaştırması, güncelleme uyarısı
 
-## Gelistirme
+## Geliştirme
 
 ```bash
 git clone https://github.com/burkimen/orpanel.git
@@ -94,21 +94,22 @@ Go 1.23+ gerektirir.
 
 ```
 orpanel/
-├── panel.go           # HTTP sunucusu, sistem tepsisi, surec yonetimi
-├── cli.go             # CLI menusu
-├── cli_windows.go     # Windows detachli process
-├── config.go          # Config yukleme/kaydetme, i18n
-├── paths.go           # Capraz platform yol cozumleme
-├── omni_health.go     # OmniRoute saglik kontrolleri
-├── omni_install.go    # npm kurulum/guncelleme/onarim islemleri
-├── autostart_*.go     # Platforma ozel otomatik baslatma
-├── dialog_*.go        # Platforma ozel diyaloglar
-├── web/               # HTML sablonlari, JS modulleri (gomulu)
-├── themes/            # CSS degiskenleri (dark/light)
+├── panel.go           # HTTP sunucusu, sistem tepsisi, süreç yönetimi
+├── cli.go             # CLI menüsü
+├── cli_windows.go     # Windows ayrılmış süreç
+├── cli_unix.go        # Unix stub
+├── config.go          # Config yükleme/kaydetme, i18n
+├── paths.go           # Çapraz platform yol çözümleme
+├── omni_health.go     # OmniRoute sağlık kontrolleri
+├── omni_install.go    # npm kurulum/güncelleme/onarım işlemleri
+├── autostart_*.go     # Platforma özel otomatik başlatma
+├── dialog_*.go        # Platforma özel diyaloglar
+├── web/               # HTML şablonları, JS modülleri (gömmeli)
+├── themes/            # CSS değişkenleri (dark/light)
 ├── locales/           # i18n dizgileri (tr/en/es)
 └── scripts/install/   # curl/irm kurulum scriptleri
 ```
 
 ## Lisans
 
-[MIT](LICENSE) — [OmniRoute](https://github.com/TorhunORG/OmniRoute) toplulugu icin yapildi.
+[MIT](LICENSE) — [OmniRoute](https://github.com/TorhunORG/OmniRoute) topluluğu için yapıldı.
