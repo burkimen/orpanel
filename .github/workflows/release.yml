@@ -41,6 +41,8 @@ jobs:
           name: win32-x64
           path: dist/orpanel-win32-x64.exe
 
+  # NOTE: windows/arm64 cross-compile below is unverified on CI until the
+  # first tag run or manual workflow_dispatch run; local GOOS/GOARCH probe only.
   build-windows-arm64:
     needs: test
     runs-on: windows-latest
@@ -83,6 +85,8 @@ jobs:
           name: linux-x64
           path: dist/orpanel-linux-x64
 
+  # NOTE: ubuntu-24.04-arm runner below is unverified on CI until the first
+  # tag run or manual workflow_dispatch run; cannot be checked from x64 Windows.
   build-linux-arm64:
     needs: test
     runs-on: ubuntu-24.04-arm
@@ -131,7 +135,10 @@ jobs:
             dist/orpanel-darwin-arm64
             dist/orpanel-darwin-x64
 
+  # Release only runs for v* tags; a manual workflow_dispatch from a branch
+  # runs test + build jobs and skips this job (github.ref is refs/heads/...).
   release:
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: [build-windows, build-windows-arm64, build-linux, build-linux-arm64, build-macos]
     runs-on: ubuntu-latest
     steps:
