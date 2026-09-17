@@ -10,7 +10,20 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race -count=1 ./...
+
   build-windows:
+    needs: test
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +41,27 @@ jobs:
           name: win32-x64
           path: dist/orpanel-win32-x64.exe
 
+  build-windows-arm64:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Set version from tag
+        shell: bash
+        run: echo "${GITHUB_REF_NAME#v}" > version.txt
+      - name: Build Windows arm64
+        shell: bash
+        run: VERSION=$(cat version.txt) && GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "-X main.AppVersion=$VERSION" -o dist/orpanel-win32-arm64.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win32-arm64
+          path: dist/orpanel-win32-arm64.exe
+
   build-linux:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,7 +83,31 @@ jobs:
           name: linux-x64
           path: dist/orpanel-linux-x64
 
+  build-linux-arm64:
+    needs: test
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libgtk-3-dev libayatana-appindicator3-dev
+      - name: Set version from tag
+        run: echo "${GITHUB_REF_NAME#v}" > version.txt
+      - name: Build Linux arm64
+        run: |
+          VERSION=$(cat version.txt)
+          CGO_ENABLED=1 go build -ldflags "-X main.AppVersion=$VERSION" -o dist/orpanel-linux-arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64
+          path: dist/orpanel-linux-arm64
+
   build-macos:
+    needs: test
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -75,7 +132,7 @@ jobs:
             dist/orpanel-darwin-x64
 
   release:
-    needs: [build-windows, build-linux, build-macos]
+    needs: [build-windows, build-windows-arm64, build-linux, build-linux-arm64, build-macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -86,13 +143,25 @@ jobs:
       - name: Set version from tag
         run: echo "${GITHUB_REF_NAME#v}" > version.txt
 
+      # Release binaries (single source of truth — keep all three lists in sync):
+      # orpanel-win32-x64.exe, orpanel-win32-arm64.exe, orpanel-linux-x64,
+      # orpanel-linux-arm64, orpanel-darwin-arm64, orpanel-darwin-x64
+      - name: Generate SHA-256 checksums
+        run: |
+          cd dist
+          sha256sum orpanel-win32-x64.exe orpanel-win32-arm64.exe orpanel-linux-x64 orpanel-linux-arm64 orpanel-darwin-arm64 orpanel-darwin-x64 > sha256sums.txt
+          sha256sum -c sha256sums.txt
+
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/orpanel-win32-x64.exe
+            dist/orpanel-win32-arm64.exe
             dist/orpanel-linux-x64
+            dist/orpanel-linux-arm64
             dist/orpanel-darwin-arm64
             dist/orpanel-darwin-x64
+            dist/sha256sums.txt
             version.txt
-          fail_on_unmatched_files: false
+          fail_on_unmatched_files: true
