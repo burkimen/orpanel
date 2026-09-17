@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -336,4 +338,45 @@ func TestGraceDeadlineRace(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+func TestResolveNodePathFixture(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "nodejs")
+	if err := os.MkdirAll(bin, 0755); err != nil {
+		t.Fatal(err)
+	}
+	name := "node"
+	if os.Getenv("OS") != "" {
+		name = "node.exe"
+	}
+	target := filepath.Join(bin, name)
+	if err := os.WriteFile(target, []byte("x"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveNodePath([]string{bin})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != target {
+		t.Fatalf("got %q want %q", got, target)
+	}
+}
+
+func TestResolveNodePathMissing(t *testing.T) {
+	if _, err := resolveNodePath([]string{t.TempDir()}); err == nil {
+		t.Fatal("expected error for empty roots")
+	}
+}
+
+func TestApplyProbeTickStartupStarting(t *testing.T) {
+	prev := probeSnapshot{status: "unknown"}
+	st := watchdogState{installed: true, probe: probeDown, startupPhase: true}
+	r := applyProbeTick(prev, st, 0)
+	if r.action != watchdogRestart {
+		t.Fatalf("action=%v", r.action)
+	}
+	if r.snap.status != "starting" {
+		t.Fatalf("status=%q want starting", r.snap.status)
+	}
 }

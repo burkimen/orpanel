@@ -30,6 +30,77 @@ func getOmniroutePath() string {
 	return getOmniroutePathEnhanced()
 }
 
+// nodeSearchRoots lists directories probed for node.exe when PATH resolution
+// fails (logon/Run-key launches inherit a narrow environment).
+func nodeSearchRoots() []string {
+	var roots []string
+	if v := os.Getenv("ProgramFiles"); v != "" {
+		roots = append(roots, filepath.Join(v, "nodejs"))
+	}
+	if v := os.Getenv("ProgramFiles(x86)"); v != "" {
+		roots = append(roots, filepath.Join(v, "nodejs"))
+	}
+	if v := os.Getenv("ProgramData"); v != "" {
+		roots = append(roots, filepath.Join(v, "chocolatey", "bin"))
+	}
+	if v := os.Getenv("LOCALAPPDATA"); v != "" {
+		roots = append(roots,
+			filepath.Join(v, "Programs", "nodejs"),
+			filepath.Join(v, "Volta", "bin"),
+		)
+	}
+	if v := os.Getenv("USERPROFILE"); v != "" {
+		roots = append(roots, filepath.Join(v, "scoop", "shims"))
+	}
+	if v := os.Getenv("APPDATA"); v != "" {
+		roots = append(roots, filepath.Join(v, "fnm", "node-versions"))
+	}
+	if v := os.Getenv("NVM_HOME"); v != "" {
+		roots = append(roots, v)
+	}
+	if v := os.Getenv("NVM_SYMLINK"); v != "" {
+		roots = append(roots, v)
+	}
+	if v := os.Getenv("APPDATA"); v != "" {
+		roots = append(roots, filepath.Join(v, "nvm"))
+	}
+	return roots
+}
+
+// resolveNodePath returns an absolute node executable path. It tries PATH
+// first (node, nodejs), then the standard install roots. Search roots are
+// injectable so tests do not depend on this machine.
+func resolveNodePath(roots []string) (string, error) {
+	if roots == nil {
+		for _, name := range []string{"node", "nodejs"} {
+			if p, err := exec.LookPath(name); err == nil {
+				if abs, err := filepath.Abs(p); err == nil {
+					p = abs
+				}
+				return p, nil
+			}
+		}
+		roots = nodeSearchRoots()
+	}
+	var searched []string
+	for _, dir := range roots {
+		cand := filepath.Join(dir, "node.exe")
+		searched = append(searched, cand)
+		if runtime.GOOS != "windows" {
+			cand = filepath.Join(dir, "node")
+			searched = append(searched, cand)
+		}
+		if st, err := os.Stat(cand); err == nil && !st.IsDir() {
+			if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(cand), ".exe") {
+				continue
+			}
+			return cand, nil
+		}
+	}
+	return "", fmt.Errorf("node not found (PATH plus %d locations)", len(searched))
+}
+
+var nodeResolvedLogged bool
 var (
 	OmniroutePath = getOmniroutePath()
 	StartCommand  = "node"
@@ -514,18 +585,30 @@ func startOmniroute() {
 			return
 		}
 	}
-
 	setIntentionalStop(false)
 	t := loadTranslations(getCurrentLang())
+	nodePath, nodeErr := resolveNodePath(nil)
+	if nodeErr != nil {
+		writeLog("ERROR: node not found in PATH or standard locations, OmniRoute start skipped")
+		probeMu.Lock()
+		probeStatus = "unreachable"
+		probeMu.Unlock()
+		return
+	}
+	if !nodeResolvedLogged {
+		nodeResolvedLogged = true
+		writeLog("INFO: node resolved: %s", nodePath)
+	}
 	writeLog("%s", t["LogStarting"])
 
-	cmd = exec.Command(StartCommand, StartArgs, "--no-open", "--no-tray")
+	cmd = exec.Command(nodePath, StartArgs, "--no-open", "--no-tray")
 	cmd.Dir = OmniroutePath
-	
+
 	cmd.Env = append(os.Environ(),
 		"CI=true",
 		"BROWSER=none",
 		"NONINTERACTIVE=true",
+		"PATH="+filepath.Dir(nodePath)+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
 
 	configureStartCmd(cmd)
@@ -783,12 +866,14 @@ func applyProbeTick(prev probeSnapshot, st watchdogState, statusCode int) probeT
 		snap.failures = 0
 		snap.recovering = true
 		snap.status = "unreachable"
+		if act == watchdogRestart && st.startupPhase {
+			snap.status = "starting"
+		}
 		snap.recoveries = prev.recoveries + 1
 		if snap.recoveries >= 4 {
 			r.action = watchdogSkip
 			r.reason = "repeated recovery attempts"
 			r.requestBackoff = true
-			snap.recovering = false
 		}
 	case watchdogSkip:
 		snap.recovering = false

@@ -210,8 +210,13 @@ func checkOmniHealth() OmniHealth {
 			msg = "OmniRoute kurulu fakat duruyor"
 		}
 		if !nodeOk {
-			health = "missing_deps"
-			msg = "Node.js 22+ gerekli, mevcut: " + nodeVer
+			if _, err := resolveNodePath(nil); err != nil {
+				health = "missing_deps"
+				msg = "node bulunamadı; PATH ve standart kurulum yerleri denendi"
+			} else {
+				health = "missing_deps"
+				msg = "Node.js 22+ gerekli, mevcut: " + nodeVer
+			}
 		}
 	} else {
 		if !nodeOk && nodeVer != "" {
