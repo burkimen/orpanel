@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,27 +27,68 @@ func getCurrentVersion() string {
 	return AppVersion
 }
 
-func getLatestReleaseInfo() (string, string, error) {
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get("https://api.github.com/repos/burkimen/orpanel/releases/latest")
-	if err != nil {
-		return "", "", err
-	}
-	defer resp.Body.Close()
+const (
+	githubLatestReleaseAPI = "https://api.github.com/repos/burkimen/orpanel/releases/latest"
+	updaterUserAgent       = "orpanel-updater"
+	// maxDownloadBytes caps a single self-update download (binary or sums file).
+	maxDownloadBytes = 200 << 20 // 200 MiB
+)
 
-	var release struct {
-		TagName string `json:"tag_name"`
-		Body    string `json:"body"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return "", "", err
-	}
-
-	version := strings.TrimPrefix(release.TagName, "v")
-	return version, release.Body, nil
+// releaseAsset maps a release asset file name to its browser download URL.
+type releaseAsset struct {
+	Name string `json:"name"`
+	URL  string `json:"browser_download_url"`
 }
 
-func getDownloadURL(version string) string {
+func githubGet(url string, timeout time.Duration) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", updaterUserAgent)
+	req.Header.Set("Accept", "application/octet-stream")
+	return (&http.Client{Timeout: timeout}).Do(req)
+}
+
+func getLatestReleaseInfo() (version, notes string, assets map[string]string, err error) {
+	req, err := http.NewRequest(http.MethodGet, githubLatestReleaseAPI, nil)
+	if err != nil {
+		return "", "", nil, err
+	}
+	req.Header.Set("User-Agent", updaterUserAgent)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", "", nil, fmt.Errorf("GitHub API HTTP %d", resp.StatusCode)
+	}
+
+	var release struct {
+		TagName string         `json:"tag_name"`
+		Body    string         `json:"body"`
+		Assets  []releaseAsset `json:"assets"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return "", "", nil, err
+	}
+
+	assets = make(map[string]string, len(release.Assets))
+	for _, a := range release.Assets {
+		if a.Name != "" && a.URL != "" {
+			assets[a.Name] = a.URL
+		}
+	}
+	version = strings.TrimPrefix(release.TagName, "v")
+	return version, release.Body, assets, nil
+}
+
+// getAssetName returns the release asset file name for this OS/arch.
+// Single source of truth shared by getDownloadURL and performUpdate.
+func getAssetName() string {
 	osName := runtime.GOOS
 	arch := runtime.GOARCH
 
@@ -54,17 +97,97 @@ func getDownloadURL(version string) string {
 		arch = "x64"
 	}
 
-	var assetName string
 	switch osName {
 	case "windows":
-		assetName = fmt.Sprintf("orpanel-win32-%s.exe", arch)
+		return fmt.Sprintf("orpanel-win32-%s.exe", arch)
 	case "darwin":
-		assetName = fmt.Sprintf("orpanel-darwin-%s", arch)
+		return fmt.Sprintf("orpanel-darwin-%s", arch)
 	default:
-		assetName = fmt.Sprintf("orpanel-%s-%s", osName, arch)
+		return fmt.Sprintf("orpanel-%s-%s", osName, arch)
 	}
+}
 
-	return fmt.Sprintf("https://github.com/burkimen/orpanel/releases/download/v%s/%s", version, assetName)
+func getDownloadURL(version string) string {
+	return fmt.Sprintf("https://github.com/burkimen/orpanel/releases/download/v%s/%s", version, getAssetName())
+}
+
+// verifyChecksum checks filePath against sha256sum-format sumsText for assetName.
+// Accepts text ("<hex>  <name>") and binary ("<hex> *<name>") markers, ignores
+// blank lines and lines with malformed hex; duplicate entries: last match wins.
+func verifyChecksum(sumsText, assetName, filePath string) error {
+	var want string
+	found := false
+	validLines := 0
+	for _, line := range strings.Split(sumsText, "\n") {
+		line = strings.TrimLeft(strings.TrimRight(line, "\r"), " \t")
+		if line == "" {
+			continue
+		}
+		sep := strings.IndexAny(line, " \t")
+		if sep < 0 {
+			continue
+		}
+		hash := line[:sep]
+		rest := strings.TrimLeft(line[sep:], " \t")
+		rest = strings.TrimPrefix(rest, "*")
+		name := strings.TrimSpace(rest)
+		raw, derr := hex.DecodeString(strings.ToLower(strings.TrimSpace(hash)))
+		if derr != nil || len(raw) != sha256.Size || name == "" {
+			continue
+		}
+		validLines++
+		if name == assetName {
+			want = strings.ToLower(strings.TrimSpace(hash))
+			found = true
+		}
+	}
+	if validLines == 0 {
+		return fmt.Errorf("malformed checksum file: no valid entries")
+	}
+	if !found {
+		return fmt.Errorf("checksum entry not found for %s", assetName)
+	}
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("checksum target unreadable: %v", err)
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return fmt.Errorf("checksum read failed: %v", err)
+	}
+	got := hex.EncodeToString(h.Sum(nil))
+	if !strings.EqualFold(got, want) {
+		return fmt.Errorf("checksum mismatch for %s: expected %s, got %s", assetName, strings.ToLower(want), got)
+	}
+	return nil
+}
+
+// downloadToFile fetches url with a bounded client timeout and size cap.
+func downloadToFile(url, destPath string) (int64, error) {
+	resp, err := githubGet(url, 120*time.Second)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	outFile, err := os.Create(destPath)
+	if err != nil {
+		return 0, err
+	}
+	written, err := io.Copy(outFile, io.LimitReader(resp.Body, maxDownloadBytes+1))
+	outFile.Close()
+	if err != nil {
+		os.Remove(destPath)
+		return 0, err
+	}
+	if written > maxDownloadBytes {
+		os.Remove(destPath)
+		return 0, fmt.Errorf("download exceeds %d MiB limit", maxDownloadBytes>>20)
+	}
+	return written, nil
 }
 
 func getUpdateDir() string {
@@ -80,7 +203,7 @@ func getUpdateDir() string {
 
 func checkForUpdate() UpdateInfo {
 	current := getCurrentVersion()
-	latest, notes, err := getLatestReleaseInfo()
+	latest, notes, _, err := getLatestReleaseInfo()
 	if err != nil {
 		return UpdateInfo{
 			CurrentVersion: current,
@@ -105,17 +228,25 @@ func checkForUpdate() UpdateInfo {
 
 func performUpdate() error {
 	current := getCurrentVersion()
-	latest, _, err := getLatestReleaseInfo()
+	latest, _, assets, err := getLatestReleaseInfo()
 	if err != nil {
-		return fmt.Errorf("GitHub releases erişilemedi: %v", err)
+		return fmt.Errorf("GitHub releases unreachable: %v", err)
 	}
 
 	if !isVersionLess(current, latest) {
-		return fmt.Errorf("zaten güncel: v%s", current)
+		return fmt.Errorf("already up to date: v%s", current)
 	}
 
-	downloadURL := getDownloadURL(latest)
-	writeLog("INFO: Güncelleme v%s → v%s indiriliyor", current, latest)
+	assetName := getAssetName()
+	sumsURL, ok := assets["sha256sums.txt"]
+	if !ok {
+		return fmt.Errorf("release v%s has no sha256sums.txt; re-run the install script to update", latest)
+	}
+	downloadURL, ok := assets[assetName]
+	if !ok {
+		return fmt.Errorf("release v%s has no asset %s; re-run the install script to update", latest, assetName)
+	}
+	writeLog("INFO: Downloading update v%s -> v%s", current, latest)
 
 	exe, _ := os.Executable()
 	updateDir := getUpdateDir()
@@ -123,29 +254,30 @@ func performUpdate() error {
 
 	newExe := filepath.Join(updateDir, filepath.Base(exe))
 
-	// Download new binary
-	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Get(downloadURL)
-	if err != nil {
-		return fmt.Errorf("indirme başarısız: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("indirme başarısız: HTTP %d", resp.StatusCode)
-	}
-
-	outFile, err := os.Create(newExe)
-	if err != nil {
-		return fmt.Errorf("dosya oluşturulamadı: %v", err)
-	}
-	written, err := io.Copy(outFile, resp.Body)
-	outFile.Close()
+	written, err := downloadToFile(downloadURL, newExe)
 	if err != nil {
 		os.Remove(newExe)
-		return fmt.Errorf("indirme başarısız: %v", err)
+		return fmt.Errorf("download failed: %v", err)
 	}
-	writeLog("INFO: İndirildi: %.1f MB", float64(written)/(1024*1024))
+	writeLog("INFO: Downloaded: %.1f MB", float64(written)/(1024*1024))
+
+	// Fetch checksums from the same release and verify before applying.
+	sumsPath := filepath.Join(updateDir, "sha256sums.txt")
+	if _, err := downloadToFile(sumsURL, sumsPath); err != nil {
+		os.Remove(newExe)
+		os.Remove(sumsPath)
+		return fmt.Errorf("release v%s has no sha256sums.txt; re-run the install script to update: %v", latest, err)
+	}
+	sumsBytes, err := os.ReadFile(sumsPath)
+	os.Remove(sumsPath)
+	if err != nil {
+		os.Remove(newExe)
+		return fmt.Errorf("checksum file unreadable: %v", err)
+	}
+	if err := verifyChecksum(string(sumsBytes), assetName, newExe); err != nil {
+		os.Remove(newExe)
+		return fmt.Errorf("checksum verification failed: %v", err)
+	}
 
 	// Make executable on unix
 	if runtime.GOOS != "windows" {
