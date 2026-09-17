@@ -165,16 +165,31 @@ jobs:
           sha256sum orpanel-win32-x64.exe orpanel-win32-arm64.exe orpanel-linux-x64 orpanel-linux-arm64 orpanel-darwin-arm64 orpanel-darwin-x64 > sha256sums.txt
           sha256sum -c sha256sums.txt
 
-      - name: Upload to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/orpanel-win32-x64.exe
-            dist/orpanel-win32-arm64.exe
-            dist/orpanel-linux-x64
-            dist/orpanel-linux-arm64
-            dist/orpanel-darwin-arm64
-            dist/orpanel-darwin-x64
-            dist/sha256sums.txt
-            version.txt
-          fail_on_unmatched_files: true
+      - name: Publish release (retry)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          for f in orpanel-win32-x64.exe orpanel-win32-arm64.exe orpanel-linux-x64 orpanel-linux-arm64 orpanel-darwin-arm64 orpanel-darwin-x64 sha256sums.txt version.txt; do
+            if [ "$f" = "version.txt" ]; then p="$f"; else p="dist/$f"; fi
+            if [ ! -f "$p" ]; then echo "missing expected file: $p" >&2; exit 1; fi
+          done
+          attempt=1
+          while [ $attempt -le 3 ]; do
+            echo "publish attempt $attempt/3"
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              CMD="upload"
+            else
+              CMD="create"
+            fi
+            if [ "$CMD" = "create" ]; then
+              if gh release create "$TAG" dist/orpanel-win32-x64.exe dist/orpanel-win32-arm64.exe dist/orpanel-linux-x64 dist/orpanel-linux-arm64 dist/orpanel-darwin-arm64 dist/orpanel-darwin-x64 dist/sha256sums.txt version.txt --title "$TAG" --notes ""; then break; fi
+            else
+              if gh release upload "$TAG" dist/orpanel-win32-x64.exe dist/orpanel-win32-arm64.exe dist/orpanel-linux-x64 dist/orpanel-linux-arm64 dist/orpanel-darwin-arm64 dist/orpanel-darwin-x64 dist/sha256sums.txt version.txt --clobber; then break; fi
+            fi
+            echo "publish attempt $attempt failed; retrying in 15s" >&2
+            attempt=$((attempt + 1))
+            if [ $attempt -le 3 ]; then sleep 15; fi
+          done
+          if [ $attempt -gt 3 ]; then echo "publish failed after 3 attempts" >&2; exit 1; fi
