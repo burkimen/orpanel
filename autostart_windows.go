@@ -8,6 +8,7 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
+// setAutoStart persists the toggle and writes/removes the Run value.
 func setAutoStart(enable bool) error {
 	cfg := loadConfig()
 	saveConfig(cfg.Language, enable)
@@ -20,9 +21,13 @@ func setAutoStart(enable bool) error {
 
 	if enable {
 		exePath, _ := os.Executable()
-		return k.SetStringValue(AppName, `"`+exePath+`"`)
+		return k.SetStringValue(AppName, autoStartCommandLine(exePath))
 	}
-	return k.DeleteValue(AppName)
+	// Disabling twice is harmless: a missing value is not an error.
+	if err := k.DeleteValue(AppName); err != nil && err != registry.ErrNotExist {
+		return err
+	}
+	return nil
 }
 
 func isAutoStartEnabled() bool {

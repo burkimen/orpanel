@@ -1,6 +1,6 @@
 # OmniRoute Kontrol Paneli (orPanel)
 
-[OmniRoute](https://github.com/TorhunORG/OmniRoute) için çapraz platform masaüstü kontrol paneli — AI istek yönlendiricisi ve load balancer. orPanel sistem tepsisinde çalışır, yerleşik terminal, sağlık izleme ve OmniRoute için tek tıkla kurulum/güncelleme sunar.
+[OmniRoute](https://github.com/diegosouzapw/OmniRoute) için çapraz platform masaüstü kontrol paneli — AI istek yönlendiricisi ve load balancer. orPanel sistem tepsisinde çalışır, yerleşik terminal, sağlık izleme ve OmniRoute için tek tıkla kurulum/güncelleme sunar.
 
 > OmniRoute topluluğu için ❤️ ile yapıldı.
 
@@ -69,9 +69,17 @@ Tarayıcınızda `http://localhost:20127` adresini açın. Panel şunları yapar
 3. OmniRoute kurulu değilse tek tıkla kurulum önerir
 4. Yerleşik terminalde OmniRoute loglarını gösterir
 
+## Otomatik Başlatma
+
+orPanel oturum açıldığında tepsi modunda başlar, sonra OmniRoute'u başlatır ve gözetir (port 20128; web arayüzü 127.0.0.1:20127). Açma/kapama Ayarlar bölümündedir.
+
+- **Windows** — kullanıcı Run değeri `OmniroutePanel`: `"<exePath>" --tray`.
+- **macOS** — `~/Library/LaunchAgents/com.burkimen.orpanel.plist`, `ProgramArguments` `<exePath>`, `--tray` ve `RunAtLoad`.
+- **Linux** — `~/.config/autostart/orpanel.desktop`, `Exec="<exePath>" --tray` ve `Terminal=false`.
+
 ## OmniRoute Entegrasyonu
 
-orPanel [OmniRoute](https://github.com/TorhunORG/OmniRoute) ile sorunsuz çalışır:
+orPanel [OmniRoute](https://github.com/diegosouzapw/OmniRoute) ile sorunsuz çalışır:
 
 - **Otomatik algılama** — `npm prefix -g`, NVM, sistem yollarından OmniRoute'u bulur
 - **Sağlık kontrolü** — `GET /api/omni/health` sürüm, port, node uyumluluğu izler
@@ -112,4 +120,4 @@ orpanel/
 
 ## Lisans
 
-[MIT](LICENSE) — [OmniRoute](https://github.com/TorhunORG/OmniRoute) topluluğu için yapıldı.
+[MIT](LICENSE) — [OmniRoute](https://github.com/diegosouzapw/OmniRoute) topluluğu için yapıldı.

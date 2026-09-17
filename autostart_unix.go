@@ -3,12 +3,12 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 )
 
+// setAutoStart persists the toggle and writes/removes the plist/desktop entry.
 func setAutoStart(enable bool) error {
 	cfg := loadConfig()
 	saveConfig(cfg.Language, enable)
@@ -28,16 +28,7 @@ func setAutoStart(enable bool) error {
 		if err := os.MkdirAll(filepath.Dir(plistPath), 0755); err != nil {
 			return err
 		}
-		plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>Label</key><string>com.burkimen.orpanel</string>
-<key>ProgramArguments</key><array><string>%s</string></array>
-<key>RunAtLoad</key><true/>
-<key>KeepAlive</key><false/>
-</dict></plist>
-`, exePath)
-		return os.WriteFile(plistPath, []byte(plist), 0644)
+		return os.WriteFile(plistPath, []byte(plistContent(exePath)), 0644)
 	}
 	// linux: .desktop
 	desktopPath := filepath.Join(home, ".config", "autostart", "orpanel.desktop")
@@ -48,8 +39,7 @@ func setAutoStart(enable bool) error {
 	if err := os.MkdirAll(filepath.Dir(desktopPath), 0755); err != nil {
 		return err
 	}
-	desktop := fmt.Sprintf("[Desktop Entry]\nType=Application\nName=Orpanel\nExec=%s\nHidden=false\nNoDisplay=false\nX-GNOME-Autostart-enabled=true\n", exePath)
-	return os.WriteFile(desktopPath, []byte(desktop), 0644)
+	return os.WriteFile(desktopPath, []byte(desktopContent(exePath)), 0644)
 }
 
 func isAutoStartEnabled() bool {

@@ -1,6 +1,6 @@
 # OmniRoute Control Panel (orPanel)
 
-A cross-platform desktop control panel for [OmniRoute](https://github.com/TorhunORG/OmniRoute) — the AI request router and load balancer. orPanel lives in your system tray, provides a built-in terminal, health monitoring, and one-click install/update for OmniRoute.
+A cross-platform desktop control panel for [OmniRoute](https://github.com/diegosouzapw/OmniRoute) — the AI request router and load balancer. orPanel lives in your system tray, provides a built-in terminal, health monitoring, and one-click install/update for OmniRoute.
 
 > Built with ❤️ for the OmniRoute community.
 
@@ -69,9 +69,17 @@ Open `http://localhost:20127` in your browser. The panel will:
 3. Offer one-click install if OmniRoute is not found
 4. Stream OmniRoute logs in the built-in terminal
 
+## Starts Automatically
+
+orPanel starts at logon in tray mode and then starts and supervises OmniRoute (port 20128; web UI on 127.0.0.1:20127). The toggle lives in Settings.
+
+- **Windows** — per-user Run value `OmniroutePanel`: `"<exePath>" --tray`.
+- **macOS** — `~/Library/LaunchAgents/com.burkimen.orpanel.plist` with `ProgramArguments` `<exePath>`, `--tray` and `RunAtLoad`.
+- **Linux** — `~/.config/autostart/orpanel.desktop` with `Exec="<exePath>" --tray` and `Terminal=false`.
+
 ## OmniRoute Integration
 
-orPanel is designed to work seamlessly with [OmniRoute](https://github.com/TorhunORG/OmniRoute):
+orPanel is designed to work seamlessly with [OmniRoute](https://github.com/diegosouzapw/OmniRoute):
 
 - **Auto-detection** — Finds OmniRoute via `npm prefix -g`, NVM, system paths
 - **Health check** — `GET /api/omni/health` monitors version, port, node compatibility
@@ -111,4 +119,4 @@ orpanel/
 
 ## License
 
-[MIT](LICENSE) — Made for the [OmniRoute](https://github.com/TorhunORG/OmniRoute) community.
+[MIT](LICENSE) — Made for the [OmniRoute](https://github.com/diegosouzapw/OmniRoute) community.
