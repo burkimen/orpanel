@@ -540,6 +540,8 @@ func startOmniroute() {
 	}
 
 	writeLog(t["LogStartedSuccess"], cmd.Process.Pid)
+	started := cmd
+	omniStartGraceUntil = time.Now().Add(30 * time.Second)
 
 	go func() {
 		scanner := bufio.NewScanner(stdout)
@@ -555,23 +557,29 @@ func startOmniroute() {
 		}
 	}()
 
-	go func() {
-		cmd.Wait()
-		var unexpected bool
-		var key string
-		cmdMutex.Lock()
-		unexpected = !getIntentionalStop()
-		if unexpected {
-			key = "LogUnexpectedStop"
-		} else {
-			key = "LogStoppedInfo"
-		}
-		lang := getCurrentLang()
+	go handleChildExit(started)
+}
+
+func handleChildExit(c *exec.Cmd) {
+	if c == nil {
+		return
+	}
+	c.Wait()
+	var key string
+	cmdMutex.Lock()
+	unexpected := !getIntentionalStop()
+	if unexpected {
+		key = "LogUnexpectedStop"
+	} else {
+		key = "LogStoppedInfo"
+	}
+	lang := getCurrentLang()
+	if cmd == c {
 		cmd = nil
-		cmdMutex.Unlock()
-		tSub := loadTranslations(lang)
-		writeLog("%s", tSub[key])
-	}()
+	}
+	cmdMutex.Unlock()
+	tSub := loadTranslations(lang)
+	writeLog("%s", tSub[key])
 }
 
 func stopOmniroute() {
@@ -613,16 +621,17 @@ func stopOmniroute() {
 }
 
 var (
-	probeMu            sync.Mutex
-	probeFailures      int
-	probeDegradedShown bool
-	externalAdopted    bool
-	probeStatus        = "unknown"
-	probeAt            time.Time
-	probeRecovering    bool
-	probeRecoveries    int
-	skipLogged         bool
-	skipReason         string
+	probeMu             sync.Mutex
+	probeFailures       int
+	probeDegradedShown  bool
+	externalAdopted     bool
+	probeStatus         = "unknown"
+	probeAt             time.Time
+	probeRecovering     bool
+	probeRecoveries     int
+	skipLogged          bool
+	skipReason          string
+	omniStartGraceUntil time.Time
 )
 
 type watchdogAction int
@@ -645,6 +654,7 @@ type watchdogState struct {
 	installed          bool
 	externalAdopted    bool
 	wasDegraded        bool
+	inGrace            bool
 }
 
 func decideWatchdogAction(s watchdogState) (watchdogAction, string) {
@@ -659,6 +669,9 @@ func decideWatchdogAction(s watchdogState) (watchdogAction, string) {
 	}
 	if s.backoffActive {
 		return watchdogSkip, "backoff active"
+	}
+	if s.inGrace && s.probe == probeDown {
+		return watchdogSkip, "starting"
 	}
 	switch s.probe {
 	case probeHealthy:
@@ -678,7 +691,6 @@ func decideWatchdogAction(s watchdogState) (watchdogAction, string) {
 		return watchdogWait, ""
 	}
 }
-
 type probeSnapshot struct {
 	failures        int
 	degradedShown   bool
@@ -686,6 +698,7 @@ type probeSnapshot struct {
 	status          string
 	recovering      bool
 	recoveries      int
+	inGrace         bool
 	skipLogged      bool
 	skipReason      string
 }
@@ -717,6 +730,7 @@ func applyProbeTick(prev probeSnapshot, st watchdogState, statusCode int) probeT
 			snap.status = "healthy"
 			snap.recovering = false
 			snap.recoveries = 0
+			snap.inGrace = false
 		} else if st.probe == probeDegraded {
 			snap.status = "degraded"
 			if !prev.degradedShown {
@@ -731,6 +745,7 @@ func applyProbeTick(prev probeSnapshot, st watchdogState, statusCode int) probeT
 		snap.status = "healthy"
 		snap.recovering = false
 		snap.recoveries = 0
+		snap.inGrace = false
 		r.logAdopt = true
 	case watchdogWait:
 		snap.failures = prev.failures + 1
@@ -744,7 +759,23 @@ func applyProbeTick(prev probeSnapshot, st watchdogState, statusCode int) probeT
 			r.action = watchdogSkip
 			r.reason = "repeated recovery attempts"
 			r.requestBackoff = true
-			snap.recovering = false
+		}
+	case watchdogSkip:
+		snap.recovering = false
+		if st.inGrace && st.probe == probeDown {
+			snap.status = "starting"
+			snap.failures = 0
+			if reason != "" && !prev.skipLogged {
+				snap.skipLogged = true
+				snap.skipReason = reason
+				r.logSkip = true
+			}
+			break
+		}
+		if reason != "" && !prev.skipLogged {
+			snap.skipLogged = true
+			snap.skipReason = reason
+			r.logSkip = true
 		}
 	}
 	r.snap = snap
@@ -756,10 +787,14 @@ func startWatchdog() {
 		for {
 			time.Sleep(3 * time.Second)
 			res := probeOmniHealth(3 * time.Second)
+			inGrace := time.Now().Before(omniStartGraceUntil)
 			cmdMutex.Lock()
 			childAlive := cmd != nil && cmd.Process != nil
 			cmdMutex.Unlock()
 			installed := isOmnirouteDir(getOmniroutePathEnhanced())
+			if !installed || !childAlive {
+				inGrace = false
+			}
 			logMutex.Lock()
 			bb := crashBackoffUntil
 			probeMu.Lock()
@@ -780,6 +815,7 @@ func startWatchdog() {
 				installed:       installed,
 				externalAdopted: adopted,
 				wasDegraded:     wasDegraded,
+				inGrace:         inGrace,
 			}
 			probeMu.Lock()
 			prev := probeSnapshot{

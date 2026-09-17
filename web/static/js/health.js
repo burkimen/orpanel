@@ -42,6 +42,7 @@ function renderHealth(h) {
         else if (h.probeStatus === "healthy") { badgeText = T.ProbeHealthy; badgeCls = "ok"; }
         else if (h.probeStatus === "degraded") { badgeText = T.ProbeDegraded; badgeCls = "warn"; }
         else if (h.probeStatus === "unreachable") { badgeText = T.ProbeUnreachable; badgeCls = "error"; }
+        else if (h.probeStatus === "starting") { badgeText = T.ProbeStarting; badgeCls = "warn"; }
         else if (h.probeStatus === "unknown") { badgeText = T.ProbeUnknown; badgeCls = "warn"; }
     }
 

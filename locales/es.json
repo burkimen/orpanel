@@ -109,5 +109,6 @@
   "ProbeDegraded": "Sin respuesta",
   "ProbeUnreachable": "Apagado",
   "ProbeRecovering": "Recuperando",
+  "ProbeStarting": "Iniciando",
   "ProbeUnknown": "Comprobando"
 }

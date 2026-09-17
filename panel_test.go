@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"testing"
 	"time"
 )
@@ -234,9 +235,13 @@ func TestApplyProbeTickBackoffEscalation(t *testing.T) {
 	st := watchdogState{installed: true, probe: probeDown, failures: 1}
 	prev := probeSnapshot{status: "unreachable", failures: 1}
 	var r probeTickResult
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 10; i++ {
+		st.failures = prev.failures
 		r = applyProbeTick(prev, st, 0)
 		prev = r.snap
+		if r.requestBackoff {
+			break
+		}
 	}
 	if !r.requestBackoff {
 		t.Fatalf("4th restart must request backoff: %+v", r.snap)
@@ -247,4 +252,55 @@ func TestApplyProbeTickBackoffEscalation(t *testing.T) {
 	if r.snap.recoveries != 4 {
 		t.Fatalf("recoveries=%d want 4", r.snap.recoveries)
 	}
+}
+
+func TestApplyProbeTickGrace(t *testing.T) {
+	prev := probeSnapshot{status: "unknown"}
+	st := watchdogState{installed: true, probe: probeDown, failures: 1, childAlive: true, inGrace: true}
+	r := applyProbeTick(prev, st, 0)
+	if r.action != watchdogSkip || r.snap.status != "starting" || r.snap.failures != 0 {
+		t.Fatalf("grace down: action=%v snap=%+v", r.action, r.snap)
+	}
+	if r.snap.recoveries != 0 || r.requestBackoff {
+		t.Fatalf("grace must not count recovery: %+v", r.snap)
+	}
+	after := watchdogState{installed: true, probe: probeDown, failures: 1, childAlive: true}
+	r2 := applyProbeTick(r.snap, after, 0)
+	if r2.action != watchdogRestartOwnChild {
+		t.Fatalf("post-grace: action=%v", r2.action)
+	}
+	healthy := watchdogState{installed: true, probe: probeHealthy, childAlive: true, inGrace: true}
+	r3 := applyProbeTick(r.snap, healthy, 200)
+	if r3.snap.status != "healthy" || r3.snap.inGrace {
+		t.Fatalf("healthy clears grace: %+v", r3.snap)
+	}
+}
+
+func TestHandleChildExit(t *testing.T) {
+	old := cmd
+	defer func() { cmd = old }()
+	cmd = nil
+	setIntentionalStop(true)
+	done := exec.Command("go", "version")
+	if err := done.Start(); err != nil {
+		t.Skipf("no process runtime: %v", err)
+	}
+	if err := done.Wait(); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	handleChildExit(done)
+	if cmd != nil {
+		t.Fatal("nil global must stay nil")
+	}
+	other := exec.Command("go", "version")
+	if err := other.Start(); err != nil {
+		t.Skipf("no process runtime: %v", err)
+	}
+	cmd = other
+	handleChildExit(done)
+	if cmd != other {
+		t.Fatal("non-matching global clobbered")
+	}
+	_ = other.Wait()
+	cmd = nil
 }
