@@ -630,9 +630,11 @@ var (
 	probeAt             time.Time
 	probeRecovering     bool
 	probeRecoveries     int
+	probePortBusyLogged bool
 	skipLogged          bool
 	skipReason          string
 	omniStartGraceUntil time.Time
+	panelStartAt        time.Time
 )
 
 type watchdogAction int
@@ -656,6 +658,8 @@ type watchdogState struct {
 	externalAdopted    bool
 	wasDegraded        bool
 	inGrace            bool
+	startupPhase       bool
+	portBusy           bool
 }
 
 func decideWatchdogAction(s watchdogState) (watchdogAction, string) {
@@ -683,6 +687,12 @@ func decideWatchdogAction(s watchdogState) (watchdogAction, string) {
 	case probeDegraded:
 		return watchdogNone, ""
 	default:
+		if s.startupPhase && !s.childAlive && !s.externalAdopted && !s.portBusy {
+			return watchdogRestart, ""
+		}
+		if s.startupPhase && !s.childAlive && !s.externalAdopted && s.portBusy {
+			return watchdogWait, "port busy, waiting"
+		}
 		if s.failures+1 >= 2 {
 			if s.childAlive {
 				return watchdogRestartOwnChild, ""
@@ -700,18 +710,20 @@ type probeSnapshot struct {
 	recovering      bool
 	recoveries      int
 	inGrace         bool
+	portBusyLogged  bool
 	skipLogged      bool
 	skipReason      string
 }
 
 type probeTickResult struct {
-	snap          probeSnapshot
-	action        watchdogAction
-	reason        string
-	statusCode    int
-	logDegraded   bool
-	logSkip       bool
-	logAdopt      bool
+	snap           probeSnapshot
+	action         watchdogAction
+	reason         string
+	statusCode     int
+	logDegraded    bool
+	logSkip        bool
+	logAdopt       bool
+	logPortBusy    bool
 	requestBackoff bool
 }
 
@@ -732,6 +744,7 @@ func applyProbeTick(prev probeSnapshot, st watchdogState, statusCode int) probeT
 			snap.recovering = false
 			snap.recoveries = 0
 			snap.inGrace = false
+			snap.portBusyLogged = false
 		} else if st.probe == probeDegraded {
 			snap.status = "degraded"
 			if !prev.degradedShown {
@@ -744,13 +757,28 @@ func applyProbeTick(prev probeSnapshot, st watchdogState, statusCode int) probeT
 		snap.degradedShown = false
 		snap.externalAdopted = true
 		snap.status = "healthy"
-		snap.recovering = false
 		snap.recoveries = 0
 		snap.inGrace = false
+		snap.portBusyLogged = false
 		r.logAdopt = true
 	case watchdogWait:
 		snap.failures = prev.failures + 1
 		snap.status = "unreachable"
+		if st.portBusy && !prev.portBusyLogged {
+			snap.portBusyLogged = true
+			r.logPortBusy = true
+		}
+		snap.recovering = false
+		if st.inGrace && st.probe == probeDown {
+			snap.status = "starting"
+			snap.failures = 0
+			if reason != "" && !prev.skipLogged {
+				snap.skipLogged = true
+				snap.skipReason = reason
+				r.logSkip = true
+			}
+			break
+		}
 	case watchdogRestart, watchdogRestartOwnChild:
 		snap.failures = 0
 		snap.recovering = true
@@ -760,6 +788,7 @@ func applyProbeTick(prev probeSnapshot, st watchdogState, statusCode int) probeT
 			r.action = watchdogSkip
 			r.reason = "repeated recovery attempts"
 			r.requestBackoff = true
+			snap.recovering = false
 		}
 	case watchdogSkip:
 		snap.recovering = false
@@ -785,6 +814,7 @@ func applyProbeTick(prev probeSnapshot, st watchdogState, statusCode int) probeT
 
 func startWatchdog() {
 	go func() {
+		panelStartAt = time.Now()
 		for {
 			time.Sleep(3 * time.Second)
 			res := probeOmniHealth(3 * time.Second)
@@ -797,6 +827,8 @@ func startWatchdog() {
 			if !installed || !childAlive {
 				inGrace = false
 			}
+			portBusy := isPortInUse(OmniPort)
+			startupPhase := time.Since(panelStartAt) < 60*time.Second
 			logMutex.Lock()
 			bb := crashBackoffUntil
 			probeMu.Lock()
@@ -818,6 +850,8 @@ func startWatchdog() {
 				externalAdopted: adopted,
 				wasDegraded:     wasDegraded,
 				inGrace:         inGrace,
+				startupPhase:    startupPhase,
+				portBusy:        portBusy,
 			}
 			probeMu.Lock()
 			prev := probeSnapshot{
@@ -827,6 +861,7 @@ func startWatchdog() {
 				status:          probeStatus,
 				recovering:      probeRecovering,
 				recoveries:      probeRecoveries,
+				portBusyLogged:  probePortBusyLogged,
 				skipLogged:      skipLogged,
 				skipReason:      skipReason,
 			}
@@ -840,6 +875,7 @@ func startWatchdog() {
 			probeAt = time.Now()
 			probeRecovering = tick.snap.recovering
 			probeRecoveries = tick.snap.recoveries
+			probePortBusyLogged = tick.snap.portBusyLogged
 			skipLogged = tick.snap.skipLogged
 			skipReason = tick.snap.skipReason
 			probeMu.Unlock()
@@ -861,6 +897,10 @@ func startWatchdog() {
 			}
 			if tick.logDegraded {
 				writeLog("WARN: OmniRoute reachable but unhealthy (status %d), waiting", res.statusCode)
+				continue
+			}
+			if tick.logPortBusy {
+				writeLog("WARN: OmniRoute port %d busy but health not answering yet, waiting", OmniPort)
 				continue
 			}
 			if tick.logSkip {
@@ -885,7 +925,6 @@ func startWatchdog() {
 							logMutex.Lock()
 							watchdogFailCount++
 							watchdogLastFail = time.Now()
-							crashBackoffUntil = time.Now().Add(30 * time.Second)
 							logMutex.Unlock()
 							continue
 						}
