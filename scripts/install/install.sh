@@ -31,15 +31,18 @@ case "$ARCH" in
   *) echo "Desteklenmeyen arch: $ARCH" >&2; exit 1 ;;
 esac
 
-# Resolve version
+# Resolve version (explicit ORPANEL_VERSION skips the API entirely)
 if [ "$VERSION" = "latest" ]; then
   echo "→ En son surum sorgulaniyor..."
+  TAG=""
   if command -v curl >/dev/null 2>&1; then
-    TAG="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/' | head -n1)"
+    TAG="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/' | head -n1)" || TAG=""
   elif command -v wget >/dev/null 2>&1; then
-    TAG="$(wget -qO- "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/' | head -n1)"
+    TAG="$(wget -qO- "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/' | head -n1)" || TAG=""
   fi
-  if [ -z "$TAG" ]; then TAG="1.0.9"; fi
+  if [ -z "$TAG" ]; then
+    echo "Surum cozulemedi: $REPO icin GitHub API erisilemedi. Kurulum iptal edildi; hicbir sey indirilmedi. Tekrar deneyin veya acik surum verin: ORPANEL_VERSION=1.2.0 sh install.sh" >&2; exit 1
+  fi
   VERSION="$TAG"
 fi
 

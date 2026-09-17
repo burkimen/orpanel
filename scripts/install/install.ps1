@@ -18,14 +18,19 @@ $BinPath = Join-Path $InstallDir "orPanel.exe"
 $Arch = "x64"
 try { if ((Get-CimInstance Win32_ComputerSystem).SystemType -like "*ARM*") { $Arch = "arm64" } } catch {}
 
-# Resolve version
+# Resolve version (explicit -Version skips the API entirely)
 if ($Version -eq "latest") {
   Write-Host "-> En son surum sorgulaniyor..."
   try {
     $api = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -TimeoutSec 10
     $Version = $api.tag_name.TrimStart("v")
   } catch {
-    $Version = "1.0.0"
+    Write-Host "Surum cozulemedi: $Repo icin GitHub API erisilemedi ($($_.Exception.Message)). Kurulum iptal edildi; hicbir sey indirilmedi. Tekrar deneyin veya acik surum verin: -Version 1.2.0"
+    exit 1
+  }
+  if ([string]::IsNullOrWhiteSpace($Version)) {
+    Write-Host "Surum cozulemedi: $Repo icin GitHub API bos yanit dondu. Kurulum iptal edildi; hicbir sey indirilmedi. Tekrar deneyin veya acik surum verin: -Version 1.2.0"
+    exit 1
   }
 }
 $VersionNoV = $Version.TrimStart("v")
