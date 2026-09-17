@@ -380,3 +380,43 @@ func TestApplyProbeTickStartupStarting(t *testing.T) {
 		t.Fatalf("status=%q want starting", r.snap.status)
 	}
 }
+
+func TestAdoptedHealthyMapping(t *testing.T) {
+	probeMu.Lock()
+	oldStatus, oldAdopted := probeStatus, externalAdopted
+	probeStatus = "healthy"
+	externalAdopted = true
+	probeMu.Unlock()
+	defer func() {
+		probeMu.Lock()
+		probeStatus, externalAdopted = oldStatus, oldAdopted
+		probeMu.Unlock()
+	}()
+	h := checkOmniHealth()
+	if !h.Installed {
+		t.Skip("omniroute not installed here")
+	}
+	if h.Status != "running" || h.Health != "ok" || !h.ExternallyManaged {
+		t.Fatalf("adopted-healthy got status=%q health=%q managed=%v", h.Status, h.Health, h.ExternallyManaged)
+	}
+}
+
+func TestPortBusyDownMapping(t *testing.T) {
+	probeMu.Lock()
+	oldStatus, oldAdopted := probeStatus, externalAdopted
+	probeStatus = "unreachable"
+	externalAdopted = false
+	probeMu.Unlock()
+	defer func() {
+		probeMu.Lock()
+		probeStatus, externalAdopted = oldStatus, oldAdopted
+		probeMu.Unlock()
+	}()
+	h := checkOmniHealth()
+	if !h.Installed || h.PortFree {
+		t.Skip("needs installed + busy port")
+	}
+	if h.Status != "port_conflict" {
+		t.Fatalf("busy-down got status=%q", h.Status)
+	}
+}

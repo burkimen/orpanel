@@ -1267,6 +1267,7 @@ func newPanelMux() *http.ServeMux {
 	// Update endpoints
 	mux.HandleFunc("/api/update/check", handleCheckUpdate)
 	mux.HandleFunc("/api/update/install", handlePerformUpdate)
+	mux.HandleFunc("/api/update/status", handleUpdateStatus)
 
 	return mux
 }

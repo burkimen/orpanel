@@ -110,5 +110,13 @@
   "ProbeUnreachable": "Apagado",
   "ProbeRecovering": "Recuperando",
   "ProbeStarting": "Iniciando",
-  "ProbeUnknown": "Comprobando"
+  "ProbeUnknown": "Comprobando",
+  "UpdatePhaseDownloading": "Descargando actualización…",
+  "UpdatePhaseVerifying": "Verificando actualización…",
+  "UpdatePhaseApplying": "Aplicando actualización…",
+  "UpdatePhaseRestarting": "Reiniciando el panel…",
+  "UpdatePhaseFailed": "Actualización fallida",
+  "UpdateRestarting": "El panel se está reiniciando…",
+  "UpdateWaitReturn": "Esperando que vuelva el panel…",
+  "UpdateGone": "El panel se está reiniciando, esperando…"
 }

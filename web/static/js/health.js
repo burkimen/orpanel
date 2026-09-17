@@ -94,10 +94,14 @@ function renderHealth(h) {
             acts += '<button class="btn-health ghost" onclick="doOmniAction(\'reinstall\')"><span class="material-symbols-rounded">restart_alt</span> ' + T.HealthBtnReinstall + '</button>';
         }
     } else if (h.health==="port_conflict" || h.status==="corrupt") {
-        if (installing) acts += '<button class="btn-health warning" disabled><span class="material-symbols-rounded">hourglass_top</span> ' + T.HealthBtnInstalling + '</button>';
-        else {
-            acts += '<button class="btn-health warning" onclick="doOmniAction(\'repair\')"><span class="material-symbols-rounded">build</span> ' + T.HealthBtnRepair + '</button>';
+        if (h.externallyManaged) {
             acts += '<button class="btn-health ghost" onclick="doOmniAction(\'reinstall\')"><span class="material-symbols-rounded">restart_alt</span> ' + T.HealthBtnReinstall + '</button>';
+        } else {
+            if (installing) acts += '<button class="btn-health warning" disabled><span class="material-symbols-rounded">hourglass_top</span> ' + T.HealthBtnInstalling + '</button>';
+            else {
+                acts += '<button class="btn-health warning" onclick="doOmniAction(\'repair\')"><span class="material-symbols-rounded">build</span> ' + T.HealthBtnRepair + '</button>';
+                acts += '<button class="btn-health ghost" onclick="doOmniAction(\'reinstall\')"><span class="material-symbols-rounded">restart_alt</span> ' + T.HealthBtnReinstall + '</button>';
+            }
         }
     } else if (h.status==="stopped") {
         if (installing) acts += '<button class="btn-health warning" disabled><span class="material-symbols-rounded">hourglass_top</span> ' + T.HealthBtnInstalling + '</button>';
@@ -106,7 +110,6 @@ function renderHealth(h) {
         if (installing) acts += '<button class="btn-health warning" disabled><span class="material-symbols-rounded">hourglass_top</span> ' + T.HealthBtnInstalling + '</button>';
         else acts += '<button class="btn-health ghost" onclick="doOmniAction(\'reinstall\')"><span class="material-symbols-rounded">restart_alt</span> ' + T.HealthBtnReinstall + '</button>';
     }
-    healthActions.innerHTML = acts;
 
     const shouldDisableControls = !h.installed || h.opRunning || h.status === 'installing' || h.status === 'not_installed' || h.health === 'installing';
     [btnStart, btnStop, btnRestart, btnOpenOmni].forEach(btn => {

@@ -192,7 +192,14 @@ func checkOmniHealth() OmniHealth {
 	health := "not_installed"
 	msg := "OmniRoute sisteminizde kurulu değil"
 	if installed {
-		if running && ver != "" {
+		probeMu.Lock()
+		adoptedHealthy := externalAdopted && (probeStatus == "healthy" || probeStatus == "starting")
+		probeMu.Unlock()
+		if adoptedHealthy && ver != "" {
+			status = "running"
+			health = "ok"
+			msg = "OmniRoute çalışıyor"
+		} else if running && ver != "" {
 			status = "running"
 			health = "ok"
 			msg = "OmniRoute çalışıyor"
@@ -234,7 +241,6 @@ func checkOmniHealth() OmniHealth {
 		NodeVersion:     nodeVer,
 		NodeOk:          nodeOk,
 		Status:          status,
-		PortFree:        portFree,
 		Health:          health,
 		Message:         msg,
 	}

@@ -3,6 +3,9 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -126,5 +129,45 @@ func TestGetAssetNameSharedByDownloadURL(t *testing.T) {
 	}
 	if strings.Count(url, name) != 1 {
 		t.Fatalf("asset name appears %d times in %q", strings.Count(url, name), url)
+	}
+}
+
+func TestUpdatePhaseMachine(t *testing.T) {
+	setUpdatePhase(updateIdle, "", "", "")
+	if got := getUpdateStatus(); got.Phase != updateIdle {
+		t.Fatalf("idle got %q", got.Phase)
+	}
+	setUpdatePhase(updateDownloading, "1.2.2", "1.2.4", "")
+	setUpdatePhase(updateVerifying, "", "", "")
+	setUpdatePhase(updateApplying, "", "", "")
+	if got := getUpdateStatus(); got.Phase != updateApplying {
+		t.Fatalf("applying got %q", got.Phase)
+	}
+	if got := getUpdateStatus(); got.CurrentVersion != "1.2.2" || got.LatestVersion != "1.2.4" {
+		t.Fatalf("versions %+v", got)
+	}
+	setUpdatePhase(updateFailed, "", "", "boom")
+	if got := getUpdateStatus(); got.Phase != updateFailed || got.Error != "boom" {
+		t.Fatalf("failed %+v", got)
+	}
+	setUpdatePhase(updateIdle, "", "", "")
+}
+
+func TestUpdateStatusHandler(t *testing.T) {
+	setUpdatePhase(updateDownloading, "1.0.0", "1.0.1", "")
+	defer setUpdatePhase(updateIdle, "", "", "")
+	mux := newPanelMux()
+	req := httptest.NewRequest(http.MethodGet, "/api/update/status", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code=%d", rec.Code)
+	}
+	var s updateStatus
+	if err := json.Unmarshal(rec.Body.Bytes(), &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.Phase != updateDownloading || s.LatestVersion != "1.0.1" {
+		t.Fatalf("status %+v", s)
 	}
 }

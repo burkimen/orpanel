@@ -108,19 +108,90 @@ async function checkAndUpdate() {
             btn.disabled = true;
             btn.innerHTML = '<span class="material-symbols-rounded">hourglass_top</span> ' + T.SettingUpdating;
             showToast(T.SettingUpdating, 'info', 60000);
+            pollUpdateStatus(info, btn);
             try {
                 await fetch('/api/update/install', { method: 'POST' });
-                showToast(T.SettingUpdateDone, 'ok');
-                setTimeout(() => location.reload(), 3000);
             } catch(e) {
-                showToast(T.SettingUpdateFailed, 'error');
-                btn.disabled = false;
+                // The panel exits mid-update; loss of the response is expected.
             }
         };
     } catch(e) {
         info.textContent = T.SettingUpdateFailed;
         btn.disabled = false;
         showToast(T.SettingUpdateFailed, 'error');
+    }
+}
+
+function updatePhaseLabel(s) {
+    if (!s) return T.SettingUpdating;
+    if (s.phase === 'downloading') return T.UpdatePhaseDownloading;
+    if (s.phase === 'verifying') return T.UpdatePhaseVerifying;
+    if (s.phase === 'applying') return T.UpdatePhaseApplying;
+    if (s.phase === 'restarting') return T.UpdatePhaseRestarting;
+    if (s.phase === 'failed') return T.UpdatePhaseFailed + (s.error ? ': ' + s.error : '');
+    return T.SettingUpdating;
+}
+
+async function pollUpdateStatus(info, btn) {
+    const started = Date.now();
+    let goneSince = 0;
+    const showProgress = (label) => {
+        info.innerHTML = '<span class="material-symbols-rounded" style="vertical-align:-4px">hourglass_top</span> ' + label +
+            '<span class="health-progress" style="display:block;margin-top:6px"><span class="health-progress-bar" style="width:100%"></span></span>';
+    };
+    showProgress(T.SettingUpdating);
+    for (;;) {
+        await new Promise(r => setTimeout(r, 650));
+        let s = null;
+        try {
+            const res = await fetch('/api/update/status');
+            s = await res.json();
+        } catch(e) {
+            if (!goneSince) goneSince = Date.now();
+            showProgress(T.UpdateGone);
+            if (Date.now() - started > 60000) {
+                info.textContent = T.SettingUpdateFailed;
+                showToast(T.SettingUpdateFailed, 'error');
+                btn.disabled = false;
+                return;
+            }
+            continue;
+        }
+        goneSince = 0;
+        if (s.phase === 'failed') {
+            info.textContent = updatePhaseLabel(s);
+            showToast(updatePhaseLabel(s), 'error');
+            btn.disabled = false;
+            return;
+        }
+        showProgress(updatePhaseLabel(s));
+        if (s.phase === 'restarting') {
+            showProgress(T.UpdateRestarting);
+            await waitForPanelReturn(info, btn, started);
+            return;
+        }
+    }
+}
+
+async function waitForPanelReturn(info, btn, started) {
+    info.textContent = T.UpdateWaitReturn;
+    for (;;) {
+        await new Promise(r => setTimeout(r, 750));
+        try {
+            const res = await fetch('/api/status');
+            if (res.ok) {
+                showToast(T.SettingUpdateDone, 'ok');
+                location.reload();
+                return;
+            }
+        } catch(e) {}
+        if (Date.now() - started > 60000) {
+            info.textContent = T.SettingUpdateFailed;
+            showToast(T.SettingUpdateFailed, 'error');
+            btn.disabled = false;
+            return;
+        }
+        info.textContent = T.UpdateGone;
     }
 }
 

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -247,7 +248,7 @@ func performUpdate() error {
 		return fmt.Errorf("release v%s has no asset %s; re-run the install script to update", latest, assetName)
 	}
 	writeLog("INFO: Downloading update v%s -> v%s", current, latest)
-
+	setUpdatePhase(updateDownloading, current, latest, "")
 	exe, _ := os.Executable()
 	updateDir := getUpdateDir()
 	os.MkdirAll(updateDir, 0755)
@@ -260,6 +261,7 @@ func performUpdate() error {
 		return fmt.Errorf("download failed: %v", err)
 	}
 	writeLog("INFO: Downloaded: %.1f MB", float64(written)/(1024*1024))
+	setUpdatePhase(updateVerifying, current, latest, "")
 
 	// Fetch checksums from the same release and verify before applying.
 	sumsPath := filepath.Join(updateDir, "sha256sums.txt")
@@ -283,9 +285,8 @@ func performUpdate() error {
 	if runtime.GOOS != "windows" {
 		os.Chmod(newExe, 0755)
 	}
-
 	writeLog("SUCCESS: v%s → v%s güncelleniyor, yeniden başlatılıyor...", current, latest)
-
+	setUpdatePhase(updateApplying, current, latest, "")
 	if runtime.GOOS == "windows" {
 		// Windows: batch script ile güncelleme
 		applyScript := filepath.Join(updateDir, "apply_update.bat")
@@ -307,8 +308,8 @@ start "" "%s" --tray
 		cmd.SysProcAttr = relaunchAttrs()
 		cmd.Start()
 	}
-
 	// Exit current process
+	setUpdatePhase(updateRestarting, current, latest, "")
 	time.Sleep(500 * time.Millisecond)
 	os.Exit(0)
 	return nil
@@ -320,16 +321,97 @@ func handleCheckUpdate(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(info)
 }
 
+type updatePhase string
+
+const (
+	updateIdle       updatePhase = "idle"
+	updateDownloading updatePhase = "downloading"
+	updateVerifying  updatePhase = "verifying"
+	updateApplying   updatePhase = "applying"
+	updateRestarting updatePhase = "restarting"
+	updateFailed     updatePhase = "failed"
+)
+
+type updateStatus struct {
+	Phase          updatePhase `json:"phase"`
+	Error          string      `json:"error"`
+	CurrentVersion string      `json:"currentVersion"`
+	LatestVersion  string      `json:"latestVersion"`
+	StartedAt      string      `json:"startedAt"`
+	UpdatedAt      string      `json:"updatedAt"`
+}
+
+var (
+	updateMu     sync.Mutex
+	updatePhaseNow updatePhase = updateIdle
+	updateErr    string
+	updateCur    string
+	updateLat    string
+	updateStart  time.Time
+	updateAt     time.Time
+)
+
+func setUpdatePhase(p updatePhase, cur, lat, errStr string) {
+	updateMu.Lock()
+	defer updateMu.Unlock()
+	updatePhaseNow = p
+	if cur != "" {
+		updateCur = cur
+	}
+	if lat != "" {
+		updateLat = lat
+	}
+	updateErr = errStr
+	now := time.Now()
+	if p == updateDownloading && updateStart.IsZero() {
+		updateStart = now
+	}
+	updateAt = now
+}
+
+func getUpdateStatus() updateStatus {
+	updateMu.Lock()
+	defer updateMu.Unlock()
+	var started, updated string
+	if !updateStart.IsZero() {
+		started = updateStart.UTC().Format(time.RFC3339)
+	}
+	if !updateAt.IsZero() {
+		updated = updateAt.UTC().Format(time.RFC3339)
+	}
+	return updateStatus{
+		Phase:          updatePhaseNow,
+		Error:          updateErr,
+		CurrentVersion: updateCur,
+		LatestVersion:  updateLat,
+		StartedAt:      started,
+		UpdatedAt:      updated,
+	}
+}
+
+func handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(getUpdateStatus())
+}
+
 func handlePerformUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	cur, lat := getCurrentVersion(), ""
+	if info := checkForUpdate(); info.LatestVersion != "" {
+		lat = info.LatestVersion
+		cur = info.CurrentVersion
+	}
+	setUpdatePhase(updateDownloading, cur, lat, "")
 	go func() {
 		if err := performUpdate(); err != nil {
+			setUpdatePhase(updateFailed, "", "", err.Error())
 			writeLog("ERROR: Güncelleme başarısız: %v", err)
 		}
 	}()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "started"})
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(getUpdateStatus())
 }

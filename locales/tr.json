@@ -110,5 +110,13 @@
   "ProbeUnreachable": "Kapalı",
   "ProbeRecovering": "Kurtarılıyor",
   "ProbeStarting": "Başlatılıyor",
-  "ProbeUnknown": "Kontrol ediliyor"
+  "ProbeUnknown": "Kontrol ediliyor",
+  "UpdatePhaseDownloading": "Güncelleme indiriliyor…",
+  "UpdatePhaseVerifying": "Güncelleme doğrulanıyor…",
+  "UpdatePhaseApplying": "Güncelleme uygulanıyor…",
+  "UpdatePhaseRestarting": "Panel yeniden başlatılıyor…",
+  "UpdatePhaseFailed": "Güncelleme başarısız",
+  "UpdateRestarting": "Panel yeniden başlatılıyor…",
+  "UpdateWaitReturn": "Panelin dönmesi bekleniyor…",
+  "UpdateGone": "Panel yeniden başlatılıyor, bekleniyor…"
 }
