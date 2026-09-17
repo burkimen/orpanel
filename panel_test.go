@@ -1,7 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestOwnedByOmnirouteTable(t *testing.T) {
@@ -70,5 +74,177 @@ func TestOwnedByOmnirouteEmptyPath(t *testing.T) {
 	}
 	if ownedByOmniroute(1234) {
 		t.Fatal("empty OmniroutePath must refuse attribution")
+	}
+}
+
+func TestDecideWatchdogAction(t *testing.T) {
+	tests := []struct {
+		name   string
+		state  watchdogState
+		want   watchdogAction
+	}{
+		{name: "healthy no child adopt", state: watchdogState{probe: probeHealthy, installed: true}, want: watchdogAdoptExternal},
+		{name: "healthy with child none", state: watchdogState{probe: probeHealthy, childAlive: true, installed: true}, want: watchdogNone},
+		{name: "healthy adopted none", state: watchdogState{probe: probeHealthy, installed: true, externalAdopted: true}, want: watchdogNone},
+		{name: "down first wait", state: watchdogState{probe: probeDown, failures: 0, installed: true}, want: watchdogWait},
+		{name: "down second restart", state: watchdogState{probe: probeDown, failures: 1, installed: true}, want: watchdogRestart},
+		{name: "down second own child", state: watchdogState{probe: probeDown, failures: 1, childAlive: true, installed: true}, want: watchdogRestartOwnChild},
+		{name: "degraded none", state: watchdogState{probe: probeDegraded, installed: true}, want: watchdogNone},
+		{name: "intentional stop skip", state: watchdogState{probe: probeDown, failures: 5, intentionalStop: true, installed: true}, want: watchdogSkip},
+		{name: "op running skip", state: watchdogState{probe: probeDown, failures: 5, opRunning: true, installed: true}, want: watchdogSkip},
+		{name: "backoff skip", state: watchdogState{probe: probeDown, failures: 5, backoffActive: true, installed: true}, want: watchdogSkip},
+		{name: "not installed skip", state: watchdogState{probe: probeDown, failures: 5}, want: watchdogSkip},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got, _ := decideWatchdogAction(tc.state); got != tc.want {
+				t.Fatalf("got %v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestOmniHealthJSONFields(t *testing.T) {
+	probeMu.Lock()
+	probeStatus = "degraded"
+	probeFailures = 1
+	externalAdopted = true
+	probeRecovering = true
+	probeMu.Unlock()
+	defer func() {
+		probeMu.Lock()
+		probeStatus = "unknown"
+		probeFailures = 0
+		externalAdopted = false
+		probeRecovering = false
+		probeAt = time.Time{}
+		probeMu.Unlock()
+	}()
+	mux := newPanelMux()
+	req := httptest.NewRequest(http.MethodGet, "/api/omni/health", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	var h map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &h); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"probeStatus", "consecutiveFailures", "lastProbeAt", "externallyManaged", "recovering"} {
+		if _, ok := h[k]; !ok {
+			t.Fatalf("missing field %s", k)
+		}
+	}
+}
+
+func TestApplyProbeTick(t *testing.T) {
+	tests := []struct {
+		name  string
+		prev  probeSnapshot
+		state watchdogState
+		check func(t *testing.T, r probeTickResult)
+	}{
+		{
+			name:  "healthy own child",
+			prev:  probeSnapshot{status: "unknown"},
+			state: watchdogState{installed: true, probe: probeHealthy, childAlive: true},
+			check: func(t *testing.T, r probeTickResult) {
+				if r.snap.status != "healthy" || r.snap.failures != 0 {
+					t.Fatalf("snap=%+v", r.snap)
+				}
+			},
+		},
+		{
+			name:  "healthy clears degraded",
+			prev:  probeSnapshot{status: "degraded", degradedShown: true, failures: 1},
+			state: watchdogState{installed: true, probe: probeHealthy, childAlive: true},
+			check: func(t *testing.T, r probeTickResult) {
+				if r.snap.degradedShown || r.snap.status != "healthy" {
+					t.Fatalf("snap=%+v", r.snap)
+				}
+			},
+		},
+		{
+			name:  "degraded no restart",
+			prev:  probeSnapshot{status: "healthy"},
+			state: watchdogState{installed: true, probe: probeDegraded},
+			check: func(t *testing.T, r probeTickResult) {
+				if r.action != watchdogNone || r.snap.status != "degraded" || r.snap.failures != 0 || !r.logDegraded {
+					t.Fatalf("action=%v snap=%+v log=%v", r.action, r.snap, r.logDegraded)
+				}
+			},
+		},
+		{
+			name:  "down once",
+			prev:  probeSnapshot{status: "healthy"},
+			state: watchdogState{installed: true, probe: probeDown, failures: 0},
+			check: func(t *testing.T, r probeTickResult) {
+				if r.action != watchdogWait || r.snap.failures != 1 || r.snap.status != "unreachable" {
+					t.Fatalf("action=%v snap=%+v", r.action, r.snap)
+				}
+			},
+		},
+		{
+			name:  "down twice recovers",
+			prev:  probeSnapshot{status: "unreachable", failures: 1},
+			state: watchdogState{installed: true, probe: probeDown, failures: 1},
+			check: func(t *testing.T, r probeTickResult) {
+				if r.action != watchdogRestart || !r.snap.recovering {
+					t.Fatalf("action=%v snap=%+v", r.action, r.snap)
+				}
+			},
+		},
+		{
+			name:  "healthy after recovery",
+			prev:  probeSnapshot{status: "unreachable", recovering: true, failures: 0},
+			state: watchdogState{installed: true, probe: probeHealthy, childAlive: true},
+			check: func(t *testing.T, r probeTickResult) {
+				if r.snap.recovering || r.snap.status != "healthy" {
+					t.Fatalf("snap=%+v", r.snap)
+				}
+			},
+		},
+		{
+			name:  "skip latch resets",
+			prev:  probeSnapshot{skipLogged: true, skipReason: "op running"},
+			state: watchdogState{installed: true, probe: probeHealthy, childAlive: true},
+			check: func(t *testing.T, r probeTickResult) {
+				if r.snap.skipLogged || r.snap.skipReason != "" {
+					t.Fatalf("snap=%+v", r.snap)
+				}
+			},
+		},
+		{
+			name:  "healthy after restarts clears counter",
+			prev:  probeSnapshot{status: "unreachable", recoveries: 3, recovering: true},
+			state: watchdogState{installed: true, probe: probeHealthy, childAlive: true},
+			check: func(t *testing.T, r probeTickResult) {
+				if r.snap.recoveries != 0 || r.requestBackoff {
+					t.Fatalf("snap=%+v backoff=%v", r.snap, r.requestBackoff)
+				}
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.check(t, applyProbeTick(tc.prev, tc.state, 500))
+		})
+	}
+}
+
+func TestApplyProbeTickBackoffEscalation(t *testing.T) {
+	st := watchdogState{installed: true, probe: probeDown, failures: 1}
+	prev := probeSnapshot{status: "unreachable", failures: 1}
+	var r probeTickResult
+	for i := 0; i < 4; i++ {
+		r = applyProbeTick(prev, st, 0)
+		prev = r.snap
+	}
+	if !r.requestBackoff {
+		t.Fatalf("4th restart must request backoff: %+v", r.snap)
+	}
+	if r.action == watchdogRestart || r.action == watchdogRestartOwnChild {
+		t.Fatalf("must not ask for another restart: action=%v", r.action)
+	}
+	if r.snap.recoveries != 4 {
+		t.Fatalf("recoveries=%d want 4", r.snap.recoveries)
 	}
 }

@@ -104,5 +104,10 @@
   "SettingUpdateAvail": "Update available",
   "SettingUpdateDone": "Update completed!",
   "SettingUpdateFailed": "Update failed",
-  "SettingUpdateNow": "Update Now"
+  "SettingUpdateNow": "Update Now",
+  "ProbeHealthy": "Running",
+  "ProbeDegraded": "Not responding",
+  "ProbeUnreachable": "Down",
+  "ProbeRecovering": "Recovering",
+  "ProbeUnknown": "Off"
 }

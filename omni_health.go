@@ -14,18 +14,23 @@ import (
 )
 
 type OmniHealth struct {
-	Installed       bool   `json:"installed"`
-	Path            string `json:"path"`
-	Version         string `json:"version"`
-	Latest          string `json:"latest"`
-	UpdateAvailable bool   `json:"updateAvailable"`
-	NodeVersion     string `json:"nodeVersion"`
-	NodeOk          bool   `json:"nodeOk"`
-	Status          string `json:"status"` // running|stopped|not_installed|corrupt|port_conflict|installing
-	PortFree        bool   `json:"portFree"`
-	Health          string `json:"health"` // ok|port_conflict|missing_deps|not_installed
-	Message         string `json:"message"`
-	OpRunning       bool   `json:"opRunning"`
+	Installed           bool   `json:"installed"`
+	Path                string `json:"path"`
+	Version             string `json:"version"`
+	Latest              string `json:"latest"`
+	UpdateAvailable     bool   `json:"updateAvailable"`
+	NodeVersion         string `json:"nodeVersion"`
+	NodeOk              bool   `json:"nodeOk"`
+	Status              string `json:"status"` // running|stopped|not_installed|corrupt|port_conflict|installing
+	PortFree            bool   `json:"portFree"`
+	Health              string `json:"health"` // ok|port_conflict|missing_deps|not_installed
+	Message             string `json:"message"`
+	OpRunning           bool   `json:"opRunning"`
+	ProbeStatus         string `json:"probeStatus"`
+	ConsecutiveFailures int    `json:"consecutiveFailures"`
+	LastProbeAt         string `json:"lastProbeAt"`
+	ExternallyManaged   bool   `json:"externallyManaged"`
+	Recovering          bool   `json:"recovering"`
 }
 
 var (
@@ -228,6 +233,15 @@ func checkOmniHealth() OmniHealth {
 		Health:          health,
 		Message:         msg,
 	}
+	probeMu.Lock()
+	h.ProbeStatus = probeStatus
+	h.ConsecutiveFailures = probeFailures
+	if !probeAt.IsZero() {
+		h.LastProbeAt = probeAt.UTC().Format(time.RFC3339)
+	}
+	h.ExternallyManaged = externalAdopted
+	h.Recovering = probeRecovering
+	probeMu.Unlock()
 	omniOpMu.Lock()
 	h.OpRunning = omniOpRunning
 	omniOpMu.Unlock()

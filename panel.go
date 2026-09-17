@@ -612,57 +612,254 @@ func stopOmniroute() {
 	}
 }
 
+var (
+	probeMu            sync.Mutex
+	probeFailures      int
+	probeDegradedShown bool
+	externalAdopted    bool
+	probeStatus        = "unknown"
+	probeAt            time.Time
+	probeRecovering    bool
+	probeRecoveries    int
+	skipLogged         bool
+	skipReason         string
+)
+
+type watchdogAction int
+
+const (
+	watchdogNone watchdogAction = iota
+	watchdogAdoptExternal
+	watchdogWait
+	watchdogRestart
+	watchdogRestartOwnChild
+	watchdogSkip
+)
+type watchdogState struct {
+	probe              probeOutcome
+	childAlive         bool
+	failures           int
+	intentionalStop    bool
+	opRunning          bool
+	backoffActive      bool
+	installed          bool
+	externalAdopted    bool
+	wasDegraded        bool
+}
+
+func decideWatchdogAction(s watchdogState) (watchdogAction, string) {
+	if !s.installed {
+		return watchdogSkip, "not installed"
+	}
+	if s.intentionalStop {
+		return watchdogSkip, "intentional stop"
+	}
+	if s.opRunning {
+		return watchdogSkip, "op running"
+	}
+	if s.backoffActive {
+		return watchdogSkip, "backoff active"
+	}
+	switch s.probe {
+	case probeHealthy:
+		if !s.childAlive && !s.externalAdopted {
+			return watchdogAdoptExternal, ""
+		}
+		return watchdogNone, ""
+	case probeDegraded:
+		return watchdogNone, ""
+	default:
+		if s.failures+1 >= 2 {
+			if s.childAlive {
+				return watchdogRestartOwnChild, ""
+			}
+			return watchdogRestart, ""
+		}
+		return watchdogWait, ""
+	}
+}
+
+type probeSnapshot struct {
+	failures        int
+	degradedShown   bool
+	externalAdopted bool
+	status          string
+	recovering      bool
+	recoveries      int
+	skipLogged      bool
+	skipReason      string
+}
+
+type probeTickResult struct {
+	snap          probeSnapshot
+	action        watchdogAction
+	reason        string
+	statusCode    int
+	logDegraded   bool
+	logSkip       bool
+	logAdopt      bool
+	requestBackoff bool
+}
+
+func applyProbeTick(prev probeSnapshot, st watchdogState, statusCode int) probeTickResult {
+	act, reason := decideWatchdogAction(st)
+	r := probeTickResult{action: act, reason: reason, statusCode: statusCode}
+	snap := prev
+	if act != watchdogSkip {
+		snap.skipLogged = false
+		snap.skipReason = ""
+	}
+	switch act {
+	case watchdogNone:
+		if st.probe == probeHealthy {
+			snap.failures = 0
+			snap.degradedShown = false
+			snap.status = "healthy"
+			snap.recovering = false
+			snap.recoveries = 0
+		} else if st.probe == probeDegraded {
+			snap.status = "degraded"
+			if !prev.degradedShown {
+				snap.degradedShown = true
+				r.logDegraded = true
+			}
+		}
+	case watchdogAdoptExternal:
+		snap.failures = 0
+		snap.degradedShown = false
+		snap.externalAdopted = true
+		snap.status = "healthy"
+		snap.recovering = false
+		snap.recoveries = 0
+		r.logAdopt = true
+	case watchdogWait:
+		snap.failures = prev.failures + 1
+		snap.status = "unreachable"
+	case watchdogRestart, watchdogRestartOwnChild:
+		snap.failures = 0
+		snap.recovering = true
+		snap.status = "unreachable"
+		snap.recoveries = prev.recoveries + 1
+		if snap.recoveries >= 4 {
+			r.action = watchdogSkip
+			r.reason = "repeated recovery attempts"
+			r.requestBackoff = true
+			snap.recovering = false
+		}
+	}
+	r.snap = snap
+	return r
+}
+
 func startWatchdog() {
 	go func() {
 		for {
-			time.Sleep(5 * time.Second)
+			time.Sleep(3 * time.Second)
+			res := probeOmniHealth(3 * time.Second)
 			cmdMutex.Lock()
-			shouldRestart := cmd == nil && !getIntentionalStop()
+			childAlive := cmd != nil && cmd.Process != nil
 			cmdMutex.Unlock()
-			if !shouldRestart {
-				continue
-			}
-			// If OmniRoute not installed, don't auto-restart (user must click install)
-			if !isOmnirouteDir(getOmniroutePathEnhanced()) {
-				continue
-			}
-			// Respect crash backoff, but if port now free, clear EADDRINUSE backoff
+			installed := isOmnirouteDir(getOmniroutePathEnhanced())
 			logMutex.Lock()
 			bb := crashBackoffUntil
+			probeMu.Lock()
+			failures := probeFailures
+			adopted := externalAdopted
+			wasDegraded := probeDegradedShown
+			probeMu.Unlock()
+			backoffActive := !bb.IsZero() && time.Now().Before(bb)
 			failCnt := watchdogFailCount
 			logMutex.Unlock()
-			if !bb.IsZero() && time.Now().Before(bb) {
-				if !isPortInUse(OmniPort) {
-					logMutex.Lock()
-					watchdogFailCount = 0
-					crashBackoffUntil = time.Time{}
-					logMutex.Unlock()
-					writeLog("INFO: Port %d serbest kaldı, watchdog backoff temizlendi", OmniPort)
-				} else {
-					if failCnt > 0 && time.Now().Sub(watchdogLastFail) > 10*time.Second {
-						writeLog("INFO: Backoff aktif, watchdog beklemede (remaining %v)", time.Until(bb).Round(time.Second))
-						logMutex.Lock()
-						watchdogLastFail = time.Now()
-						logMutex.Unlock()
+			st := watchdogState{
+				probe:           res.outcome,
+				childAlive:      childAlive,
+				failures:        failures,
+				intentionalStop: getIntentionalStop(),
+				opRunning:       isOmniOpRunning(),
+				backoffActive:   backoffActive,
+				installed:       installed,
+				externalAdopted: adopted,
+				wasDegraded:     wasDegraded,
+			}
+			probeMu.Lock()
+			prev := probeSnapshot{
+				failures:        probeFailures,
+				degradedShown:   probeDegradedShown,
+				externalAdopted: externalAdopted,
+				status:          probeStatus,
+				recovering:      probeRecovering,
+				recoveries:      probeRecoveries,
+				skipLogged:      skipLogged,
+				skipReason:      skipReason,
+			}
+			probeMu.Unlock()
+			tick := applyProbeTick(prev, st, res.statusCode)
+			probeMu.Lock()
+			probeFailures = tick.snap.failures
+			probeDegradedShown = tick.snap.degradedShown
+			externalAdopted = tick.snap.externalAdopted
+			probeStatus = tick.snap.status
+			probeAt = time.Now()
+			probeRecovering = tick.snap.recovering
+			probeRecoveries = tick.snap.recoveries
+			skipLogged = tick.snap.skipLogged
+			skipReason = tick.snap.skipReason
+			probeMu.Unlock()
+			if tick.requestBackoff {
+				logMutex.Lock()
+				now := time.Now()
+				watchdogFailCount++
+				watchdogLastFail = now
+				backoff := time.Duration(30*(1<<min(watchdogFailCount-1, 3))) * time.Second
+				if backoff > 300*time.Second {
+					backoff = 300 * time.Second
+				}
+				crashBackoffUntil = now.Add(backoff)
+				probeMu.Lock()
+				probeRecovering = false
+				probeMu.Unlock()
+				logMutex.Unlock()
+				writeLog("WARN: repeated recovery attempts (%d), backing off %v", tick.snap.recoveries, backoff.Round(time.Second))
+			}
+			if tick.logDegraded {
+				writeLog("WARN: OmniRoute reachable but unhealthy (status %d), waiting", res.statusCode)
+				continue
+			}
+			if tick.logSkip {
+				writeLog("INFO: watchdog skip: %s", tick.reason)
+				continue
+			}
+			if tick.logAdopt {
+				writeLog("INFO: external OmniRoute instance detected, adopting (no duplicate spawn)")
+			}
+			switch tick.action {
+			case watchdogRestartOwnChild:
+				stopOmniroute()
+				startOmniroute()
+				probeMu.Lock()
+				externalAdopted = false
+				probeMu.Unlock()
+			case watchdogRestart:
+				if !backoffActive && installed {
+					if isPortInUse(OmniPort) {
+						if !ensurePortFree(OmniPort) {
+							writeLog("WARN: Port %d dolu, watchdog beklemede (fail #%d)", OmniPort, failCnt+1)
+							logMutex.Lock()
+							watchdogFailCount++
+							watchdogLastFail = time.Now()
+							crashBackoffUntil = time.Now().Add(30 * time.Second)
+							logMutex.Unlock()
+							continue
+						}
 					}
-					continue
+					t := loadTranslations(getCurrentLang())
+					writeLog("%s", t["LogWatchdog"])
+					startOmniroute()
 				}
+				probeMu.Lock()
+				externalAdopted = false
+				probeMu.Unlock()
 			}
-			// Port still occupied after cleanup attempts -> log once and backoff
-			if isPortInUse(OmniPort) {
-				if !ensurePortFree(OmniPort) {
-					writeLog("WARN: Port %d dolu, watchdog beklemede (fail #%d)", OmniPort, failCnt+1)
-					logMutex.Lock()
-					watchdogFailCount++
-					watchdogLastFail = time.Now()
-					crashBackoffUntil = time.Now().Add(30 * time.Second)
-					logMutex.Unlock()
-					continue
-				}
-			}
-			t := loadTranslations(getCurrentLang())
-			writeLog("%s", t["LogWatchdog"])
-			startOmniroute()
 		}
 	}()
 }

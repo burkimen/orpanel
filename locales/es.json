@@ -104,5 +104,10 @@
   "SettingUpdateAvail": "Actualización disponible",
   "SettingUpdateDone": "¡Actualización completada!",
   "SettingUpdateFailed": "Fallo en la actualización",
-  "SettingUpdateNow": "Actualizar Ahora"
+  "SettingUpdateNow": "Actualizar Ahora",
+  "ProbeHealthy": "En ejecución",
+  "ProbeDegraded": "Sin respuesta",
+  "ProbeUnreachable": "Apagado",
+  "ProbeRecovering": "Recuperando",
+  "ProbeUnknown": "Apagado"
 }

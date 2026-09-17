@@ -104,5 +104,10 @@
   "SettingUpdateAvail": "Güncelleme mevcut",
   "SettingUpdateDone": "Güncelleme tamamlandı!",
   "SettingUpdateFailed": "Güncelleme başarısız",
-  "SettingUpdateNow": "Şimdi Güncelle"
+  "SettingUpdateNow": "Şimdi Güncelle",
+  "ProbeHealthy": "Çalışıyor",
+  "ProbeDegraded": "Yanıt vermiyor",
+  "ProbeUnreachable": "Kapalı",
+  "ProbeRecovering": "Kurtarılıyor",
+  "ProbeUnknown": "Kapalı"
 }
