@@ -51,7 +51,12 @@ func exeDir() string {
 	return cachedExeDir
 }
 
+var configPathOverride string
+
 func getConfigPath() string {
+	if configPathOverride != "" {
+		return configPathOverride
+	}
 	return filepath.Join(exeDir(), ConfigFileName)
 }
 

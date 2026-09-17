@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -49,6 +48,7 @@ const LogFileName = "panel.log"
 const ConfigFileName = "config.json"
 const LocalesDir = "locales"
 const OmniPort = 20128
+const PanelPort = 20127
 const logMaxBytes = 5 * 1024 * 1024
 
 var (
@@ -63,13 +63,56 @@ var (
 	mOpen             *systray.MenuItem
 	mQuit             *systray.MenuItem
 	fileLogWriter     *os.File
+	fileLogMu         sync.Mutex
 	isIntentionalStop bool
+	stopMu            sync.RWMutex
 	currentLang       = "tr"
+	langMu            sync.RWMutex
 	configMutex       sync.Mutex
 	watchdogFailCount int
 	watchdogLastFail  time.Time
 	crashBackoffUntil time.Time
 )
+
+// Lock ordering (never invert): cmdMutex -> configMutex -> langMu/stopMu -> logMutex -> fileLogMu.
+// logMutex and fileLogMu are leaf locks: writeLog takes them briefly, and no path acquires
+// cmdMutex/configMutex/langMu/stopMu while holding logMutex/fileLogMu. Calling writeLog while
+// holding cmdMutex is allowed; the cmd.Wait goroutine still avoids it (captures state, unlocks, then logs).
+
+func getCurrentLang() string {
+	langMu.RLock()
+	defer langMu.RUnlock()
+	return currentLang
+}
+
+func setCurrentLang(lang string) {
+	langMu.Lock()
+	defer langMu.Unlock()
+	currentLang = lang
+}
+
+func getIntentionalStop() bool {
+	stopMu.RLock()
+	defer stopMu.RUnlock()
+	return isIntentionalStop
+}
+
+func setIntentionalStop(v bool) {
+	stopMu.Lock()
+	defer stopMu.Unlock()
+	isIntentionalStop = v
+}
+
+func setMenuChecked(m *systray.MenuItem, on bool) {
+	if m == nil {
+		return
+	}
+	if on {
+		m.Check()
+	} else {
+		m.Uncheck()
+	}
+}
 
 type StatusResponse struct {
 	IsRunning bool `json:"isRunning"`
@@ -104,74 +147,131 @@ func isPortInUse(port int) bool {
 	return false
 }
 
-func killPortHolders(port int) int {
-	killed := 0
+func processCommandLine(pid int) (string, bool) {
+	if runtime.GOOS == "windows" {
+		psCmd := fmt.Sprintf("Get-CimInstance Win32_Process -Filter 'ProcessId=%d' | Select-Object -ExpandProperty CommandLine", pid)
+		c := exec.Command("powershell", "-NoProfile", "-Command", psCmd)
+		hideWindow(c)
+		out, err := c.Output()
+		if err != nil {
+			return "", false
+		}
+		return strings.TrimSpace(string(out)), true
+	}
+	if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); err == nil {
+		cmdline := strings.ReplaceAll(string(data), "\x00", " ")
+		return strings.TrimSpace(cmdline), true
+	}
+	out, err := exec.Command("ps", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(string(out)), true
+}
+
+var processCommandLineFn = processCommandLine
+
+func ownedByOmniroute(pid int) bool {
+	cmdline, ok := processCommandLineFn(pid)
+	if !ok || strings.TrimSpace(cmdline) == "" {
+		return false
+	}
+	// Same values startOmniroute spawns (StartCommand + StartArgs = OmniroutePath/bin/omniroute.mjs).
+	base := strings.TrimSpace(OmniroutePath)
+	if base == "" {
+		return false
+	}
+	lower := strings.ToLower(cmdline)
+	if strings.Contains(lower, "omniroute.mjs") {
+		return true
+	}
+	return strings.Contains(lower, strings.ToLower(base))
+}
+
+func killOwnedPid(pid int) bool {
+	if pid == os.Getpid() || pid < 100 {
+		return false
+	}
+	if !ownedByOmniroute(pid) {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		c := exec.Command("taskkill", "/F", "/PID", strconv.Itoa(pid))
+		hideWindow(c)
+		return c.Run() == nil
+	}
+	return exec.Command("kill", "-9", strconv.Itoa(pid)).Run() == nil
+}
+
+func collectPortPids(port int) []int {
+	var pids []int
+	seen := map[int]bool{}
+	add := func(pid int) {
+		if pid == os.Getpid() || pid < 100 || seen[pid] {
+			return
+		}
+		seen[pid] = true
+		pids = append(pids, pid)
+	}
 	if runtime.GOOS == "windows" {
 		// Prefer PowerShell Get-NetTCPConnection
 		psCmd := fmt.Sprintf("Get-NetTCPConnection -LocalPort %d -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique", port)
 		cmd := exec.Command("powershell", "-NoProfile", "-Command", psCmd)
 		hideWindow(cmd)
-		out, err := cmd.Output()
-		if err == nil {
+		if out, err := cmd.Output(); err == nil {
 			for _, line := range strings.Split(string(out), "\n") {
 				pidStr := strings.TrimSpace(line)
 				if pidStr == "" {
 					continue
 				}
-				pid, err := strconv.Atoi(pidStr)
-				if err != nil || pid == os.Getpid() {
-					continue
+				if pid, err := strconv.Atoi(pidStr); err == nil {
+					add(pid)
 				}
-				// avoid killing system idle (0) or very low pids
-				if pid < 100 {
-					continue
-				}
-				c := exec.Command("taskkill", "/F", "/PID", strconv.Itoa(pid))
-				hideWindow(c)
-				c.Run()
-				killed++
 			}
-			if killed > 0 {
-				return killed
-			}
+		}
+		if len(pids) > 0 {
+			return pids
 		}
 		// fallback: netstat
 		cmd2 := exec.Command("cmd", "/c", fmt.Sprintf("netstat -ano | findstr :%d", port))
 		hideWindow(cmd2)
-		out2, err := cmd2.Output()
-		if err == nil {
+		if out2, err := cmd2.Output(); err == nil {
 			for _, line := range strings.Split(string(out2), "\n") {
 				fields := strings.Fields(line)
 				if len(fields) == 0 {
 					continue
 				}
-				pidStr := fields[len(fields)-1]
-				pid, err := strconv.Atoi(pidStr)
-				if err != nil || pid == os.Getpid() || pid < 100 {
-					continue
+				if pid, err := strconv.Atoi(fields[len(fields)-1]); err == nil {
+					add(pid)
 				}
-				c2 := exec.Command("taskkill", "/F", "/PID", pidStr)
-				hideWindow(c2)
-				c2.Run()
-				killed++
 			}
 		}
-	} else {
-		// macOS / Linux
-		out, err := exec.Command("sh", "-c", fmt.Sprintf("lsof -ti:%d 2>/dev/null", port)).Output()
-		if err == nil {
-			for _, pidStr := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-				pidStr = strings.TrimSpace(pidStr)
-				if pidStr == "" {
-					continue
-				}
-				exec.Command("kill", "-9", pidStr).Run()
-				killed++
+		return pids
+	}
+	// macOS / Linux
+	if out, err := exec.Command("sh", "-c", fmt.Sprintf("lsof -ti:%d 2>/dev/null", port)).Output(); err == nil {
+		for _, pidStr := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			pidStr = strings.TrimSpace(pidStr)
+			if pidStr == "" {
+				continue
+			}
+			if pid, err := strconv.Atoi(pidStr); err == nil {
+				add(pid)
 			}
 		}
-		if killed == 0 {
-			// fallback: fuser
-			exec.Command("sh", "-c", fmt.Sprintf("fuser -k %d/tcp 2>/dev/null", port)).Run()
+	}
+	return pids
+}
+
+func killPortHolders(port int) int {
+	killed := 0
+	for _, pid := range collectPortPids(port) {
+		if !ownedByOmniroute(pid) {
+			writeLog("WARN: pid %d on port %d owner unverified, leaving process running", pid, port)
+			continue
+		}
+		if killOwnedPid(pid) {
+			killed++
 		}
 	}
 	return killed
@@ -185,18 +285,36 @@ func ensurePortFree(port int) bool {
 	killPortHolders(port)
 	time.Sleep(1200 * time.Millisecond)
 	if isPortInUse(port) {
-		// second attempt - broader: kill node.exe that may be omniroute
-		if runtime.GOOS == "windows" {
-			c := exec.Command("taskkill", "/F", "/IM", "node.exe")
-			hideWindow(c)
-			c.Run()
-			time.Sleep(800 * time.Millisecond)
-		}
+		writeLog("WARN: port %d still in use, owner unverified, leaving process running", port)
 	}
 	return !isPortInUse(port)
 }
 
+func appendLogBufferLocked(line string) {
+	logBuffer = append(logBuffer, line)
+	if len(logBuffer) > maxLogSize {
+		logBuffer = logBuffer[1:]
+	}
+}
+
+func writeFileLogLine(line string) {
+	fileLogMu.Lock()
+	defer fileLogMu.Unlock()
+	if fileLogWriter == nil {
+		return
+	}
+	if _, err := fileLogWriter.WriteString(line + "\n"); err != nil {
+		return
+	}
+	if info, err := fileLogWriter.Stat(); err == nil && info.Size() > logMaxBytes {
+		// async rotate to avoid blocking
+		go rotateLogIfNeeded()
+	}
+}
+
 func rotateLogIfNeeded() {
+	fileLogMu.Lock()
+	defer fileLogMu.Unlock()
 	if fileLogWriter == nil {
 		return
 	}
@@ -209,6 +327,7 @@ func rotateLogIfNeeded() {
 		return
 	}
 	fileLogWriter.Close()
+	fileLogWriter = nil
 	// keep last 50KB
 	data, err := os.ReadFile(lp)
 	if err == nil && len(data) > 50*1024 {
@@ -226,6 +345,8 @@ func rotateLogIfNeeded() {
 }
 
 func initFileLog() {
+	fileLogMu.Lock()
+	defer fileLogMu.Unlock()
 	var err error
 	lp := getLogPath()
 	// rotate if oversized before opening
@@ -240,6 +361,10 @@ func initFileLog() {
 		} else if err3 == nil {
 			_ = os.WriteFile(lp, data, 0644)
 		}
+	}
+	if fileLogWriter != nil {
+		fileLogWriter.Close()
+		fileLogWriter = nil
 	}
 	fileLogWriter, err = os.OpenFile(lp, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
@@ -324,14 +449,9 @@ func writeLog(format string, args ...interface{}) {
 			// avoid recursion: direct write
 			ts := fmt.Sprintf("[%s] BACKOFF: Port %d çakışması algılandı, %v beklemeye alındı (fail #%d, until %s)", time.Now().Format("2006-01-02 15:04:05"), OmniPort, backoff, fc, bb.Format("15:04:05"))
 			logMutex.Lock()
-			logBuffer = append(logBuffer, ts)
-			if len(logBuffer) > maxLogSize {
-				logBuffer = logBuffer[1:]
-			}
+			appendLogBufferLocked(ts)
 			logMutex.Unlock()
-			if fileLogWriter != nil {
-				fileLogWriter.WriteString(ts + "\n")
-			}
+			writeFileLogLine(ts)
 		}
 	} else if strings.Contains(msg, "OmniRoute is running") {
 		logMutex.Lock()
@@ -341,19 +461,10 @@ func writeLog(format string, args ...interface{}) {
 	}
 
 	logMutex.Lock()
-	logBuffer = append(logBuffer, timestamped)
-	if len(logBuffer) > maxLogSize {
-		logBuffer = logBuffer[1:]
-	}
+	appendLogBufferLocked(timestamped)
 	logMutex.Unlock()
 
-	if fileLogWriter != nil {
-		fileLogWriter.WriteString(timestamped + "\n")
-		if info, err := fileLogWriter.Stat(); err == nil && info.Size() > logMaxBytes {
-			// async rotate to avoid blocking
-			go rotateLogIfNeeded()
-		}
-	}
+	writeFileLogLine(timestamped)
 }
 
 func startOmniroute() {
@@ -403,8 +514,8 @@ func startOmniroute() {
 		}
 	}
 
-	isIntentionalStop = false
-	t := loadTranslations(currentLang)
+	setIntentionalStop(false)
+	t := loadTranslations(getCurrentLang())
 	writeLog("%s", t["LogStarting"])
 
 	cmd = exec.Command(StartCommand, StartArgs, "--no-open", "--no-tray")
@@ -446,16 +557,20 @@ func startOmniroute() {
 
 	go func() {
 		cmd.Wait()
+		var unexpected bool
+		var key string
 		cmdMutex.Lock()
-		defer cmdMutex.Unlock()
-		
-		tSub := loadTranslations(currentLang)
-		cmd = nil
-		if !isIntentionalStop {
-			writeLog("%s", tSub["LogUnexpectedStop"])
+		unexpected = !getIntentionalStop()
+		if unexpected {
+			key = "LogUnexpectedStop"
 		} else {
-			writeLog("%s", tSub["LogStoppedInfo"])
+			key = "LogStoppedInfo"
 		}
+		lang := getCurrentLang()
+		cmd = nil
+		cmdMutex.Unlock()
+		tSub := loadTranslations(lang)
+		writeLog("%s", tSub[key])
 	}()
 }
 
@@ -463,12 +578,12 @@ func stopOmniroute() {
 	cmdMutex.Lock()
 	defer cmdMutex.Unlock()
 
-	isIntentionalStop = true
+	setIntentionalStop(true)
 	logMutex.Lock()
 	watchdogFailCount = 0
 	crashBackoffUntil = time.Time{}
 	logMutex.Unlock()
-	t := loadTranslations(currentLang)
+	t := loadTranslations(getCurrentLang())
 	writeLog("%s", t["LogStopSignal"])
 
 	if cmd != nil && cmd.Process != nil {
@@ -492,13 +607,7 @@ func stopOmniroute() {
 			time.Sleep(600 * time.Millisecond)
 		}
 		if isPortInUse(OmniPort) {
-			writeLog("WARN: Port %d hâlâ dolu, node.exe zorla kapatılıyor", OmniPort)
-			if runtime.GOOS == "windows" {
-				c2 := exec.Command("taskkill", "/F", "/IM", "node.exe")
-				hideWindow(c2)
-				c2.Run()
-				time.Sleep(500 * time.Millisecond)
-			}
+			writeLog("WARN: port %d still in use, owner unverified, leaving process running", OmniPort)
 		}
 	}
 }
@@ -508,7 +617,7 @@ func startWatchdog() {
 		for {
 			time.Sleep(5 * time.Second)
 			cmdMutex.Lock()
-			shouldRestart := cmd == nil && !isIntentionalStop
+			shouldRestart := cmd == nil && !getIntentionalStop()
 			cmdMutex.Unlock()
 			if !shouldRestart {
 				continue
@@ -551,7 +660,7 @@ func startWatchdog() {
 					continue
 				}
 			}
-			t := loadTranslations(currentLang)
+			t := loadTranslations(getCurrentLang())
 			writeLog("%s", t["LogWatchdog"])
 			startOmniroute()
 		}
@@ -585,8 +694,12 @@ func openBrowser(url string) {
 	_ = exec.Command("xdg-open", url).Start()
 }
 
-func startWebServer() {
-	http.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+var autostartApply = setAutoStart
+var autostartEnabled = isAutoStartEnabled
+
+func newPanelMux() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
 		if data, err := fs.ReadFile(webFS, "app.ico"); err == nil {
 			w.Header().Set("Content-Type", "image/x-icon")
 			w.Write(data)
@@ -595,7 +708,7 @@ func startWebServer() {
 		http.ServeFile(w, r, getIconPath())
 	})
 
-	http.HandleFunc("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
 		if data, err := fs.ReadFile(webFS, "favicon.svg"); err == nil {
 			w.Header().Set("Content-Type", "image/svg+xml")
 			w.Write(data)
@@ -605,13 +718,13 @@ func startWebServer() {
 	})
 
 	themesFS, _ := fs.Sub(webFS, "themes")
-	http.Handle("/themes/", http.StripPrefix("/themes/", http.FileServer(http.FS(themesFS))))
+	mux.Handle("/themes/", http.StripPrefix("/themes/", http.FileServer(http.FS(themesFS))))
 
 	// web static (js/css) - use ReadFile fallback approach
 	staticFS, _ := fs.Sub(webFS, "web/static")
-	http.Handle("/web/static/", http.StripPrefix("/web/static/", http.FileServer(http.FS(staticFS))))
+	mux.Handle("/web/static/", http.StripPrefix("/web/static/", http.FileServer(http.FS(staticFS))))
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
@@ -647,38 +760,32 @@ func startWebServer() {
 		tmpl.Execute(w, data)
 	})
 
-	http.HandleFunc("/api/start", func(w http.ResponseWriter, r *http.Request) { startOmniroute() })
-	http.HandleFunc("/api/stop", func(w http.ResponseWriter, r *http.Request) { stopOmniroute() })
-	http.HandleFunc("/api/restart", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/start", func(w http.ResponseWriter, r *http.Request) { startOmniroute() })
+	mux.HandleFunc("/api/stop", func(w http.ResponseWriter, r *http.Request) { stopOmniroute() })
+	mux.HandleFunc("/api/restart", func(w http.ResponseWriter, r *http.Request) {
 		stopOmniroute()
 		time.Sleep(1 * time.Second)
 		startOmniroute()
 	})
 
-	http.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
 		cmdMutex.Lock()
 		isRunning := (cmd != nil && cmd.Process != nil)
 		cmdMutex.Unlock()
 		json.NewEncoder(w).Encode(StatusResponse{IsRunning: isRunning})
 	})
 
-	http.HandleFunc("/api/autostart", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/autostart", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" {
 			var req AutoStartResponse
 			json.NewDecoder(r.Body).Decode(&req)
-			setAutoStart(req.IsEnabled)
-			
-			if req.IsEnabled {
-				mAutoStart.Check()
-			} else {
-				mAutoStart.Uncheck()
-			}
+			autostartApply(req.IsEnabled)
+			setMenuChecked(mAutoStart, req.IsEnabled)
 			return
 		}
-		json.NewEncoder(w).Encode(AutoStartResponse{IsEnabled: isAutoStartEnabled()})
+		json.NewEncoder(w).Encode(AutoStartResponse{IsEnabled: autostartEnabled()})
 	})
-
-	http.HandleFunc("/api/language", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/language", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" {
 			var req LangResponse
 			json.NewDecoder(r.Body).Decode(&req)
@@ -693,7 +800,7 @@ func startWebServer() {
 		json.NewEncoder(w).Encode(LangResponse{Language: cfg.Language})
 	})
 
-	http.HandleFunc("/api/theme", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/theme", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" {
 			var req ThemeResponse
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -715,13 +822,13 @@ func startWebServer() {
 	})
 
 	// OmniRoute health & ops
-	http.HandleFunc("/api/omni/health", handleOmniHealth)
-	http.HandleFunc("/api/omni/install", handleOmniInstall)
-	http.HandleFunc("/api/omni/update", handleOmniUpdate)
-	http.HandleFunc("/api/omni/repair", handleOmniRepair)
-	http.HandleFunc("/api/omni/reinstall", handleOmniReinstall)
+	mux.HandleFunc("/api/omni/health", handleOmniHealth)
+	mux.HandleFunc("/api/omni/install", handleOmniInstall)
+	mux.HandleFunc("/api/omni/update", handleOmniUpdate)
+	mux.HandleFunc("/api/omni/repair", handleOmniRepair)
+	mux.HandleFunc("/api/omni/reinstall", handleOmniReinstall)
 
-	http.HandleFunc("/api/logs", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/logs", func(w http.ResponseWriter, r *http.Request) {
 		lastStr := r.URL.Query().Get("last")
 		lastIdx, _ := strconv.Atoi(lastStr)
 
@@ -730,7 +837,7 @@ func startWebServer() {
 
 		total := len(logBuffer)
 		if lastIdx > total {
-			lastIdx = 0 
+			lastIdx = 0
 		}
 
 		newLogs := logBuffer[lastIdx:]
@@ -740,7 +847,7 @@ func startWebServer() {
 		})
 	})
 
-	http.HandleFunc("/api/file-logs", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/file-logs", func(w http.ResponseWriter, r *http.Request) {
 		logMutex.Lock()
 		defer logMutex.Unlock()
 		data, err := os.ReadFile(getLogPath())
@@ -752,7 +859,7 @@ func startWebServer() {
 	})
 
 	// Settings endpoints
-	http.HandleFunc("/api/settings/log-retention", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/settings/log-retention", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" {
 			var req struct {
 				Hours int `json:"hours"`
@@ -773,7 +880,7 @@ func startWebServer() {
 		json.NewEncoder(w).Encode(map[string]int{"hours": cfg.LogRetentionHours})
 	})
 
-	http.HandleFunc("/api/settings/clear-logs", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/settings/clear-logs", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -786,7 +893,7 @@ func startWebServer() {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
-	http.HandleFunc("/api/settings/reset", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/settings/reset", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -794,15 +901,31 @@ func startWebServer() {
 		defaultCfg := Config{Language: "", AutoStart: false, Theme: ThemeSystem, LogRetentionHours: 24}
 		data, _ := json.MarshalIndent(defaultCfg, "", "  ")
 		os.WriteFile(getConfigPath(), data, 0644)
-		currentLang = ""
+		setCurrentLang("")
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
 	// Update endpoints
-	http.HandleFunc("/api/update/check", handleCheckUpdate)
-	http.HandleFunc("/api/update/install", handlePerformUpdate)
+	mux.HandleFunc("/api/update/check", handleCheckUpdate)
+	mux.HandleFunc("/api/update/install", handlePerformUpdate)
 
-	log.Fatal(http.ListenAndServe(":20127", nil))
+	return mux
+}
+
+func startWebServer() {
+	mux := newPanelMux()
+	addr := "127.0.0.1:" + strconv.Itoa(PanelPort)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		writeLog("ERROR: panel listen failed addr=%s err=%v", addr, err)
+		fmt.Fprintf(os.Stderr, "ERROR: panel listen failed addr=%s err=%v\n", addr, err)
+		os.Exit(1)
+	}
+	if err := http.Serve(ln, guardMiddleware(mux)); err != nil {
+		writeLog("ERROR: panel listen failed addr=%s err=%v", addr, err)
+		fmt.Fprintf(os.Stderr, "ERROR: panel listen failed addr=%s err=%v\n", addr, err)
+		os.Exit(1)
+	}
 }
 
 func updateTrayTexts() {
@@ -818,7 +941,7 @@ func main() {
 	loadConfig()
 	initFileLog()
 	startLogCleanup()
-	tInit := loadTranslations(currentLang)
+	tInit := loadTranslations(getCurrentLang())
 	writeLog("%s", tInit["LogStarted"])
 
 	args := os.Args[1:]
@@ -999,13 +1122,9 @@ func onReady() {
 					startOmniroute()
 				}
 			case <-mAutoStart.ClickedCh:
-				newState := !isAutoStartEnabled()
-				setAutoStart(newState)
-				if newState {
-					mAutoStart.Check()
-				} else {
-					mAutoStart.Uncheck()
-				}
+				newState := !autostartEnabled()
+				autostartApply(newState)
+				setMenuChecked(mAutoStart, newState)
 			case <-mQuit.ClickedCh:
 				cNow := loadConfig()
 				tNow := loadTranslations(cNow.Language)
@@ -1018,7 +1137,7 @@ func onReady() {
 }
 
 func onExit() {
-	t := loadTranslations(currentLang)
+	t := loadTranslations(getCurrentLang())
 	writeLog("=== %s ===", t["TrayQuit"])
 	stopOmniroute()
 }

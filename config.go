@@ -45,7 +45,7 @@ func loadConfigUnlocked() Config {
 		cfg.LogRetentionHours = 24
 	}
 	if cfg.Language != "" {
-		currentLang = cfg.Language
+		setCurrentLang(cfg.Language)
 	}
 	return cfg
 }
@@ -61,10 +61,10 @@ func saveConfig(lang string, autoStart bool) {
 	defer configMutex.Unlock()
 	existing := loadConfigUnlocked()
 	if lang != "" {
-		currentLang = lang
-		existing.Language = currentLang
+		setCurrentLang(lang)
+		existing.Language = getCurrentLang()
 	} else if existing.Language == "" {
-		existing.Language = currentLang
+		existing.Language = getCurrentLang()
 	}
 	existing.AutoStart = autoStart
 	if !isValidTheme(existing.Theme) {
@@ -83,7 +83,7 @@ func saveTheme(theme string) error {
 	cfg := loadConfigUnlocked()
 	cfg.Theme = theme
 	if cfg.Language == "" {
-		cfg.Language = currentLang
+		cfg.Language = getCurrentLang()
 	}
 	if !isValidTheme(cfg.Theme) {
 		cfg.Theme = ThemeSystem
