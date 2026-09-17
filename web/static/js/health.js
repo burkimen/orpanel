@@ -34,13 +34,16 @@ function renderHealth(h) {
     else if (h.status === "port_conflict") { badgeText = T.HealthBadgePortConflict; badgeCls = "error"; }
     else if (h.status === "corrupt") { badgeText = T.HealthBadgeCorrupt; badgeCls = "error"; }
     else if (h.status === "installing") { badgeText = T.HealthBadgeInstalling; badgeCls = "warn"; }
-    if (h.recovering) { badgeText = T.ProbeRecovering; badgeCls = "warn"; }
-    else if (h.probeStatus === "healthy") { badgeText = T.ProbeHealthy; badgeCls = "ok"; }
-    else if (h.probeStatus === "degraded") { badgeText = T.ProbeDegraded; badgeCls = "warn"; }
-    else if (h.probeStatus === "unreachable") { badgeText = T.ProbeUnreachable; badgeCls = "error"; }
-    else if (h.probeStatus === "unknown") { badgeText = T.ProbeUnknown; badgeCls = "error"; }
-    healthBadge.textContent = badgeText;
-    healthBadge.className = "health-badge " + badgeCls;
+    // Probe state only refines the installed running/stopped family; specific
+    // states above (not installed, conflict, corrupt, installing) keep winning.
+    const probeVisible = h.installed && (h.status === "running" || h.status === "stopped");
+    if (probeVisible) {
+        if (h.recovering) { badgeText = T.ProbeRecovering; badgeCls = "warn"; }
+        else if (h.probeStatus === "healthy") { badgeText = T.ProbeHealthy; badgeCls = "ok"; }
+        else if (h.probeStatus === "degraded") { badgeText = T.ProbeDegraded; badgeCls = "warn"; }
+        else if (h.probeStatus === "unreachable") { badgeText = T.ProbeUnreachable; badgeCls = "error"; }
+        else if (h.probeStatus === "unknown") { badgeText = T.ProbeUnknown; badgeCls = "warn"; }
+    }
 
     // rows
     const rowVer = document.getElementById('healthRowVersion');

@@ -109,5 +109,5 @@
   "ProbeDegraded": "Yanıt vermiyor",
   "ProbeUnreachable": "Kapalı",
   "ProbeRecovering": "Kurtarılıyor",
-  "ProbeUnknown": "Kapalı"
+  "ProbeUnknown": "Kontrol ediliyor"
 }
