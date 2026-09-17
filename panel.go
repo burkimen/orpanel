@@ -78,6 +78,7 @@ var (
 // logMutex and fileLogMu are leaf locks: writeLog takes them briefly, and no path acquires
 // cmdMutex/configMutex/langMu/stopMu while holding logMutex/fileLogMu. Calling writeLog while
 // holding cmdMutex is allowed; the cmd.Wait goroutine still avoids it (captures state, unlocks, then logs).
+// omniStartGraceUntil and cmd belong to the cmdMutex group: always read/write them under cmdMutex.
 
 func getCurrentLang() string {
 	langMu.RLock()
@@ -787,10 +788,11 @@ func startWatchdog() {
 		for {
 			time.Sleep(3 * time.Second)
 			res := probeOmniHealth(3 * time.Second)
-			inGrace := time.Now().Before(omniStartGraceUntil)
 			cmdMutex.Lock()
 			childAlive := cmd != nil && cmd.Process != nil
+			graceUntil := omniStartGraceUntil
 			cmdMutex.Unlock()
+			inGrace := !graceUntil.IsZero() && time.Now().Before(graceUntil)
 			installed := isOmnirouteDir(getOmniroutePathEnhanced())
 			if !installed || !childAlive {
 				inGrace = false

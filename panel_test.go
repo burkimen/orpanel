@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"sync"
 	"testing"
 	"time"
 )
@@ -303,4 +304,33 @@ func TestHandleChildExit(t *testing.T) {
 	}
 	_ = other.Wait()
 	cmd = nil
+}
+
+func TestGraceDeadlineRace(t *testing.T) {
+	cmdMutex.Lock()
+	omniStartGraceUntil = time.Time{}
+	cmdMutex.Unlock()
+	defer func() {
+		cmdMutex.Lock()
+		omniStartGraceUntil = time.Time{}
+		cmdMutex.Unlock()
+	}()
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			for j := range 50 {
+				cmdMutex.Lock()
+				omniStartGraceUntil = time.Now().Add(time.Duration(n*10+j) * time.Millisecond)
+				graceUntil := omniStartGraceUntil
+				childAlive := cmd != nil && cmd.Process != nil
+				cmdMutex.Unlock()
+				inGrace := !graceUntil.IsZero() && time.Now().Before(graceUntil)
+				_ = inGrace
+				_ = childAlive
+			}
+		}(i)
+	}
+	wg.Wait()
 }
