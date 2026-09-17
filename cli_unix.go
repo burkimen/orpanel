@@ -31,6 +31,9 @@ func spawnDetached() {
 // hideConsole no-op on unix (no console window concept)
 func hideConsole() {}
 
+// detachFromConsole no-op on unix (no console window concept)
+func detachFromConsole() {}
+
 func relaunchAttrs() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{
 		Setsid: true,

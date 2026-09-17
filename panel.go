@@ -1208,6 +1208,7 @@ func main() {
 			// Keep alive
 			select {}
 		case "--tray":
+			detachFromConsole()
 			startWatchdog()
 			go startWebServer()
 			systray.Run(onReady, onExit)
@@ -1232,7 +1233,7 @@ func main() {
 	// No flags: interactive CLI menu.
 	// If stdin is not a terminal (double-click, hidden window), start tray directly.
 	if !isTerminal() {
-		hideConsole()
+		detachFromConsole()
 		startWatchdog()
 		go startWebServer()
 		systray.Run(onReady, onExit)

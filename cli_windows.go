@@ -42,6 +42,19 @@ func hideConsole() {
 	}
 }
 
+// detachFromConsole hides any attached console window, then detaches the
+// process from it (FreeConsole) and ignores console control events, so a
+// stray black window can neither show nor take the tray process down when
+// its close box is used. Tray mode only; never call on interactive paths.
+func detachFromConsole() {
+	hideConsole()
+	kernel32 := syscall.NewLazyDLL("kernel32.dll")
+	freeConsole := kernel32.NewProc("FreeConsole")
+	setCtrlHandler := kernel32.NewProc("SetConsoleCtrlHandler")
+	freeConsole.Call()
+	setCtrlHandler.Call(0, 1) // NULL handler, add=TRUE: ignore CTRL events
+}
+
 func relaunchAttrs() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{
 		CreationFlags: 0x00000008 | 0x00000200,
