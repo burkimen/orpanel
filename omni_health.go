@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -116,12 +117,15 @@ func getOmniLatestVersion() string {
 	if latestCache != "" && time.Since(latestCacheTime) < time.Hour {
 		return latestCache
 	}
-	// npm view
+	// npm view, bounded: an unbounded lookup here stalls first paint and
+	// every caller holding latestMu (TUI warm-up, HTTP handlers).
 	var cmd *exec.Cmd
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
 	if runtime.GOOS == "windows" {
-		cmd = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", "npm view omniroute version")
+		cmd = exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", "npm view omniroute version")
 	} else {
-		cmd = exec.Command("npm", "view", "omniroute", "version")
+		cmd = exec.CommandContext(ctx, "npm", "view", "omniroute", "version")
 	}
 	hideWindow(cmd)
 	out, err := cmd.Output()

@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -507,23 +508,52 @@ func (a *tuiApp) applyFocusLocked() {
 // again (SetRoot clears the screen and re-focuses the first child, which
 // used to snap the selection back on every tick).
 func runTuiApp() {
-	restoreCP := tuiCodePageSwitch()
+	tuiDiagLog("runTuiApp entry")
+	tuiDiagConsoleState("entry")
+	var restoreCP func()
+	if os.Getenv("ORPANEL_TUI_NO_RAW") == "1" {
+		tuiDiagLog("NO_RAW hatch: skipping code-page switch")
+		restoreCP = func() {}
+	} else {
+		restoreCP = tuiCodePageSwitch()
+	}
 	defer restoreCP()
+	tuiDiagConsoleState("after-own-setup")
+	tuiDiagLog("newTuiApp start")
 	a := newTuiApp()
+	a.app.SetRoot(a.pages, true)
+	tuiDiagLog("newTuiApp done (SetRoot installed)")
 	a.refresh()
+	tuiDiagLog("refresh done")
 	a.applyFocus()
+	tuiDiagLog("applyFocus done")
+	if w, h, err := tuiConsoleSize(); err == nil {
+		tuiDiagLog("pre-Run console size: %dx%d", w, h)
+	} else {
+		tuiDiagLog("pre-Run console size err: %v", err)
+	}
 	getSize := func() (int, int) {
 		if w, h, err := tuiConsoleSize(); err == nil && w > 0 && h > 0 {
 			return w, h
 		}
 		return 80, 24
 	}
+	var afterDraws int64
 	a.app.SetAfterDrawFunc(func(screen tcell.Screen) {
-		if w, h := screen.Size(); w > 0 && h > 0 {
+		n := atomic.AddInt64(&afterDraws, 1)
+		w, h := screen.Size()
+		tuiDiagLog("afterDraw #%d size=%dx%d", n, w, h)
+		if w > 0 && h > 0 {
 			a.mu.Lock()
 			a.lastW, a.lastH = w, h
 			a.mu.Unlock()
 			a.applyBodyClass(w)
+		}
+		tuiDiagLog("afterDraw #%d exit", n)
+		if n == 1 {
+			tuiDiagLog("first-draw cells row0=%s title=%s border=%s",
+				tuiDiagReadCells(0, 0, 20), tuiDiagReadCells(2, 0, 30), tuiDiagReadCells(0, 3, 20))
+			tuiDiagConsoleState("after-first-draw")
 		}
 	})
 	tick := time.NewTicker(1 * time.Second)
@@ -532,6 +562,17 @@ func runTuiApp() {
 	// (may block ~1.5s during the omni boot window), then queue the
 	// read-only content refresh onto the loop via QueueUpdateDraw.
 	go func() {
+		// Warm-up off the startup path: first paint must never wait on net.
+		tuiDiagLog("warm-up probe start")
+		tuiProbeWorkerTick()
+		tuiDiagLog("warm-up probe end")
+		a.app.QueueUpdateDraw(func() {
+			tuiDiagLog("first-paint queued refresh")
+			w, _ := getSize()
+			a.applyBodyClass(w)
+			a.refresh()
+			a.applyFocus()
+		})
 		for range tick.C {
 			tuiProbeWorkerTick()
 			a.app.QueueUpdateDraw(func() {
@@ -542,9 +583,16 @@ func runTuiApp() {
 			})
 		}
 	}()
-	// Warm the caches once before the first draw so the initial frame has
-	// real values (runTuiApp's own goroutine, not the loop — no keys yet).
-	tuiProbeWorkerTick()
+	// Watchdog: if no draw in 5s, dump stacks (cheap fallback instrument).
+	go func() {
+		time.Sleep(5 * time.Second)
+		n := atomic.LoadInt64(&afterDraws)
+		tuiDiagLog("watchdog: afterDraws=%d", n)
+		tuiDiagLog("watchdog cells row0=%s", tuiDiagReadCells(0, 0, 20))
+		if n == 0 {
+			tuiDiagDumpStacks("no-afterDraw-in-5s")
+		}
+	}()
 	// Input capture runs ON the event-loop goroutine (application.go: the
 	// loop calls `event = inputCapture(event)` directly). Application.Draw
 	// is QueueUpdate (blocking on the same loop), so ANY Draw call here
@@ -553,9 +601,13 @@ func runTuiApp() {
 	// forwards to the root primitive then draws. QueueUpdateDraw is only
 	// safe from other goroutines (the 1s tick below).
 	a.setupInputCapture()
+	tuiDiagLog("Run() entry")
+	tuiDiagConsoleState("pre-Run")
 	if err := a.app.Run(); err != nil {
+		tuiDiagLog("Run() err: %v", err)
 		printPlainSummary()
 	}
+	tuiDiagLog("Run() returned")
 }
 
 // setupInputCapture installs the single key path (capture runs ON the event
