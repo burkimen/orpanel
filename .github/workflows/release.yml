@@ -192,5 +192,11 @@ jobs:
             echo "publish attempt $attempt failed; retrying in 15s" >&2
             attempt=$((attempt + 1))
             if [ $attempt -le 3 ]; then sleep 15; fi
-          done
           if [ $attempt -gt 3 ]; then echo "publish failed after 3 attempts" >&2; exit 1; fi
+          gh release edit "$TAG" --draft=false --latest
+          STATE="$(gh release view "$TAG" --json isDraft,assets --jq '{draft: .isDraft, n: (.assets | length), names: (.assets | map(.name) | sort)}')"
+          echo "post-publish state: $STATE"
+          DRAFT="$(gh release view "$TAG" --json isDraft --jq '.isDraft')"
+          COUNT="$(gh release view "$TAG" --json assets --jq '.assets | length')"
+          if [ "$DRAFT" != "false" ]; then echo "release $TAG still draft" >&2; exit 1; fi
+          if [ "$COUNT" != "8" ]; then echo "release $TAG has $COUNT assets, want 8" >&2; exit 1; fi
