@@ -403,14 +403,6 @@ func TestSimFooterContextual(t *testing.T) {
 	}
 }
 
-func TestDecideMode(t *testing.T) {
-	if got := tuiDecideMode(true); got != "client" {
-		t.Fatalf("reachable = %q", got)
-	}
-	if got := tuiDecideMode(false); got != "direct" {
-		t.Fatalf("unreachable = %q", got)
-	}
-}
 
 func TestPanelClientPostsEndpoint(t *testing.T) {
 	var gotPath, gotMethod string

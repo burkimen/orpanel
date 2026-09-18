@@ -22,7 +22,6 @@ const (
 	tuiActScrollUp
 	tuiActScrollDown
 	tuiActPaneNext
-	tuiActConfirmOK
 	tuiActConfirmCancel
 )
 
@@ -37,8 +36,6 @@ type tuiKey struct {
 	esc bool // escape-prefixed sequence (arrows etc)
 	raw string
 }
-
-func tuiKeyRune(r rune) tuiKey { return tuiKey{r: r} }
 
 type tuiState struct {
 	pane     int

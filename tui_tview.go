@@ -182,9 +182,6 @@ func (a *tuiApp) footerTextLocked(width int) string {
 	return joined
 }
 
-func (a *tuiApp) footerKeys() string {
-	return a.footerText(80)
-}
 
 func (a *tuiApp) helpBody() string {
 	var b strings.Builder
@@ -251,18 +248,6 @@ func (a *tuiApp) showModal(title, body, hint string, buttons []string, onOK func
 	}
 	a.app.SetFocus(m)
 }
-
-func (a *tuiApp) showHelp() {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.st.showHelp = true
-	a.showModal(tuiTr("TuiHelpTitle", a.t, "Keys"), a.helpBody(), "Esc "+tuiTr("TuiClose", a.t, "Close"), []string{tuiTr("TuiClose", a.t, "Close")}, nil, func() {
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		a.st.showHelp = false
-	})
-}
-
 
 func (a *tuiApp) confirmAction(act int) {
 	b, _ := tuiBindingByAct(act)
@@ -446,21 +431,6 @@ func (a *tuiApp) barTextLocked() string {
 	return sb.String()
 }
 
-// screenSize reads the size from the active screen (simulation or console).
-// Falls back to 80x24 only when the screen reports zero.
-func (a *tuiApp) screenSize(screen tcell.Screen) (int, int) {
-	if screen != nil {
-		if w, h := screen.Size(); w > 0 && h > 0 {
-			return w, h
-		}
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.lastW > 0 && a.lastH > 0 {
-		return a.lastW, a.lastH
-	}
-	return 80, 24
-}
 
 // mainLayout builds the stable root once: header + body + bar + footer.
 // Body direction comes from the width class; the log pane always takes the
@@ -530,10 +500,6 @@ func (a *tuiApp) applyFocusLocked() {
 	}
 }
 
-// layout keeps the old name for callers; it returns the stable pages root.
-func (a *tuiApp) layout() tview.Primitive {
-	return a.pages
-}
 
 // runTuiApp is the tview event loop: tcell decodes all input, redraws happen
 // on every key AND a 1s tick, action results show immediately. The tree is

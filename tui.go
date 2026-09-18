@@ -373,14 +373,6 @@ var (
 	tuiPanelMiss time.Time
 )
 
-// tuiDecideMode is pure: panel reachable => client mode, else direct.
-func tuiDecideMode(panelAnswers bool) string {
-	if panelAnswers {
-		return "client"
-	}
-	return "direct"
-}
-
 // tuiRefreshPanelCache dials 127.0.0.1:20127 and stores the answer. WORKER
 // ONLY: call from the tick goroutine (or the dump harness), never on the
 // event loop (dial latency would hitch keys during the boot window).
@@ -412,11 +404,6 @@ func tuiCachedPanelServing() bool {
 	return tuiPanelHit
 }
 
-// tuiPanelServing is the worker/dump entry: refresh then read. Tests and the
-// dump harness call it; the event loop must use tuiCachedPanelServing only.
-func tuiPanelServing() bool {
-	return tuiRefreshPanelCache()
-}
 
 // tuiPanelEndpoint maps mutating actions to panel API paths. Every action
 // with a non-empty endpoint goes through the panel when one is serving.

@@ -19,10 +19,6 @@ type tuiModeOps struct {
 	set func(h windows.Handle, mode uint32) error
 }
 
-func realTuiModeOps() tuiModeOps {
-	return tuiModeOps{get: windows.GetConsoleMode, set: windows.SetConsoleMode}
-}
-
 // tuiConsoleModeRoundTrip saves the mode, applies fn, and restores the saved
 // mode. Every exit path in runTuiApp goes through tcell's own restore plus
 // this ordering guarantee in tests.
@@ -67,17 +63,6 @@ func tuiCodePageSwitch() func() {
 	}
 }
 
-// tuiEnter logs the debug contract; tcell handles the real console modes.
-func tuiEnter() (func(), error) {
-	if tuiDebugOn() {
-		tuiDebugLog("TUI console enter: tcell owns input (windows)")
-	}
-	return func() {
-		if tuiDebugOn() {
-			tuiDebugLog("TUI console leave: tcell restored (windows)")
-		}
-	}, nil
-}
 // tuiConsoleSize queries the real Windows console size.
 func tuiConsoleSize() (int, int, error) {
 	var info windows.ConsoleScreenBufferInfo
