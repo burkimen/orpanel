@@ -130,8 +130,23 @@ func TestWindowsSwapOwnerTrap(t *testing.T) {
 		}
 		t.Errorf("sandbox %s still locked after sleeper exit (holder pid %d): %v", dir, sleeper.Process.Pid, err)
 	})
-	time.Sleep(500 * time.Millisecond)
-	// Recreate the owner's state: previous swap renamed the live image to
+	// Deterministic gate (no fixed sleep): the sleeper proves its own image
+	// is mapped (open-for-write must fail) and only then writes dir-ready.
+	// Poll for that file; the OLD-scheme move below is only valid once the
+	// child is truly mapped, otherwise Defender/cold-loader delay turns the
+	// trap into a false red ("trap invalid").
+	ready := filepath.Join(dir, "sleeper.ready")
+	readyDeadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(readyDeadline) {
+			alive := sleeper.ProcessState == nil || !sleeper.ProcessState.Exited()
+			t.Fatalf("sleeper never signalled mapped image (ready file %s missing; child pid %d alive=%v)", ready, sleeper.Process.Pid, alive)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	// app.exe.old (allowed), then a fresh app.exe arrived (copy).
 	if out, err := exec.Command("cmd", "/c", "move", "/Y", app, oldFixed).CombinedOutput(); err != nil {
 		t.Fatalf("setup move aside failed (sandbox broken): %v %s", err, out)
@@ -211,8 +226,24 @@ func logTimestamps(t *testing.T, log string) []time.Time {
 
 // TestHelperSwapSleeper is not a real test: the trap re-execs the test
 // binary gated to this name so the child sits mapped on app.exe running
-// NO suite code (no TempDir cleanup of its own, no test server, no log
-// writes). It must stay trivial: sleep until killed.
+// NO suite code. It proves its own image is mapped — opening os.Executable
+// for write MUST fail while the loader holds it — and only then writes
+// sleeper.ready next to itself. The parent polls for that file instead of
+// sleeping a fixed 500ms (Defender/cold-loader delay made the OLD-scheme
+// move succeed spuriously => false "trap invalid" red).
 func TestHelperSwapSleeper(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	for i := 0; i < 100; i++ {
+		f, err := os.OpenFile(exe, os.O_WRONLY, 0)
+		if err != nil {
+			_ = os.WriteFile(filepath.Join(filepath.Dir(exe), "sleeper.ready"), []byte("mapped"), 0644)
+			break
+		}
+		_ = f.Close()
+		time.Sleep(100 * time.Millisecond)
+	}
 	time.Sleep(60 * time.Second)
 }
