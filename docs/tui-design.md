@@ -28,7 +28,7 @@ durumsal alt bilgi. Gerisi veri panelleri. Oranlar:
 | çalışıyor | Durdur, Yeniden Başlat | Güncelle (varsa ★ en üstte), Onar, Web Arayüzü, Otomatik Başlat, Dil, Tema | Durdur, Yeniden Başlat, Güncelle, Onar |
 | durdu | Başlat | Güncelle, Onar, Web Arayüzü, Otomatik Başlat, Dil, Tema | Güncelle, Onar |
 | başlıyor / işlem sürüyor | — (`işlem sürüyor…` satırı) | Web Arayüzü, Dil | — |
-| kurulu değil | Kur | Web Arayüzü, Dil, Tema | — |
+| kurulu değil | Kur * | Web Arayüzü, Dil, Tema | Kur |
 | ulaşılamıyor | Başlat (yeniden dene) | Onar, Dil | Onar |
 
 - Kural: birbirini tutmayan eylemler GİZLENİR (Başlat ile Durdur asla aynı
@@ -40,6 +40,9 @@ durumsal alt bilgi. Gerisi veri panelleri. Oranlar:
   `… +N daha ↓` yazar (sessiz kırpma yok).
 - Yardım ekranı o anki duruma erişilebilen TÜM eylemleri listeler
   (aynı tablodan üretilir; tabloda yoksa ekranda yok).
+- Onay kuralı (§9b): Kur, Onar, Güncelle, Durdur, Yeniden Başlat VE çıkış
+  (`q`) her zaman onay ister. `q` onayı panel/tepsi çalışmaya devam eder
+  der ve güvenli varsayılan `vazgeç`'tir.
 
 ## 3. Fare modeli
 
@@ -48,29 +51,41 @@ durumsal alt bilgi. Gerisi veri panelleri. Oranlar:
 - Tık seçer; yıkıcı olmayanda ikinci tık / çift tık çalıştırır, yıkıcıda
   onay penceresi açar. Tekerlek Kayıtlar/Yardım'ı kaydırır. Panele tıklamak
   odağı taşır. Modal düğmeleri tıklanabilir; varsayılan `onayla` (Enter).
-- Platform gerçeği: tview/tcell'de fare `EnableMouse()` ile açılır ve
-  yalnızca terminal fare olayını taşıyorsa çalışır (Windows Terminal evet,
-  eski conhost hayır). Fare yoksa klavye yolu BİREBİR aynı ve eksiksiz
-  kalır; seçim göstergesi giriş yolundan bağımsızdır (iki yol aynı `►`).
+- KUSUR (v1.4.5'te doğrulandı): fare hiç açılmıyor — uygulama
+  `EnableMouse(true)` çağırmıyor, bu yüzden tcell terminalin fare
+  protokolünü istemiyor ve hiçbir fare olayı gelmiyor. Düzeltme: tview
+  uygulamasında `EnableMouse(true)` + hover/tık/tekerlek/tıklanabilir
+  modal düğmeleri (varsayılan `onayla`).
+- Sonuçlar (dürüst): (a) fare olayı taşımayan uçta klavye yolu BİREBİR
+  aynı ve eksiksiz kalır (iki yol aynı `►` seçim göstergesi); (b) fare
+  kipi açıkken uçbirimde metin seçimi genelde Shift gerektirir — yardım
+  veya README bunu yazar.
+- Doğrulama: koşum fare enjekte edemez; en yakın kanıt, aynı işleyiciye
+  sentetik fare olayı sürmek + sahibinin terminalinde gerçek yol onayıdır.
 
 ## 4. Klavye
 
 Görünür sözlük: `↑↓` seç · `Enter` çalıştır · `Tab` panel · `Esc` kapat ·
 `?` yardım · `q` çık. Alt bilgi odaya göre değişir (İşlemler odaktayken
 seçim ipucu, Kayıtlar odaktayken kaydırma ipucu).
-Öneri: harf kısayolları eylemlerden TAMAMEN kalkar (tek cümlelik gerekçe:
-keşfedilebilir değiller ve kayıt odasındaki `j/k/g/G` ile çakışıyorlar;
-ok + fare her şeyi karşılıyor). `j/k` yalnızca Kayıtlar odasında kaydırma
-takma adı olarak gizli kalır.
+Karar (sahip onayı): `j/k` TAMAMEN kalkar — gizli takma ad bile yok,
+kaydırma odasında bile yok. Gerekçe: keşfedilemezler ve ok+fare her şeyi
+karşılıyor. Sözlük: oklar + Tab + Enter + Esc + `?` + `q` (hepsi görünür).
 
 ## 5. Görsel dil
 
-- Renk yalnızca anlam taşır: kayıt düzeyi (INFO/WARN/ERROR) + durum rozeti
-  (`● Çalışıyor` / `○ Durdu`). Krom tek renktir; açık uçlu terminalde de
-  okunur (koyu-zemin varsayımı yok, mutlak palet adı yok).
+- Anlam renkleri: kayıt düzeyi (INFO/WARN/ERROR) + durum rozeti
+  (`● Çalışıyor` / `○ Durdu`).
+- TUI paleti gerçektir (sahip onayı: `t` bugüne dek yalnız web arayüzünü
+  boyuyordu): `koyu` kendi arka/ön-plan/kenarlık/seçim renklerini çizer,
+  `açık` açık uçlu uçbirimde okunur eşdeğerini çizer, `sistem` bilerek
+  uçbirimin kendi varsayılanlarını kullanır (arka planı tahmin etmeyiz —
+  ödün: sistemde marka renkleri yok, ama hiçbir uçta okunmazlık yok).
 - Seçim = ters video + `►`; odak = çift kenarlık + `►`; hover = `›` + kalın.
-- `NO_COLOR` tanımlıysa tüm ANSI kapanır; işaretler ve kenarlıklar aynen
-  kalır (kutu çizgileri renk değildir).
+- `NO_COLOR` tanımlıysa her şeyin üstüne yazar: ANSI kapanır, işaretler ve
+  kenarlıklar aynen kalır. `t` eylemi değişen paleti mesaj satırında söyler.
+- Mockup'lar (§12): aynı karenin `koyu` ve `açık` çizimleri yan yanadır
+  (ters-video/kalın metinde gösterilemez, fark başlıkta yazar).
 
 ## 6. Tepsi (seçenekler ve ödünler)
 
@@ -118,6 +133,16 @@ Sahibi kritik/yıkıcı işlemlerin karışık listede durmasını istemiyor.
   kaydırır. Yardım ekranı grupları açık yazar (örn. `Bakım ▸ Onar *`).
 - Mockup'lar (§12) güncellendi: işlem odası grup başlıklı dikey listedir.
 
+## 9b. Çıkış onayı (sahip kararı: `q` anında çıkmaz)
+
+`q` her zaman onay penceresi açar (Kur/Onar/Güncelle/Durdur/Yeniden Başlat
+ile aynı `*` kapısı). Metin: "TUI kapatılsın mı? Panel ve tepsi arka planda
+çalışmaya devam eder." Düğmeler: `[ kapat ]  [ vazgeç ]`, güvenli varsayılan
+`vazgeç` (Enter `vazgeç`'te durur; `kapat` için Tab+Enter gerekir).
+Esc = vazgeç. Gerekçe: tepsi/panel ayrı süreçtir; TUI'yi kapatmak hizmeti
+durdurmaz — bunu söylemeyen çıkış, "kapattım ama simge hâlâ orada" şaşkınlığı
+yaratır. Yardım bu davranışı açık yazar.
+
 ## 10. İstemci modunda kayıt odası (boş kutu kusuru)
 
 Kusur: TUI kendi sürecindeki `logBuffer`'ı çizer; panele istemci bağlıyken
@@ -133,15 +158,15 @@ mevcut imza; `last` kaçırılan ön-ek dizinidir, `newIndex` toplam uzunluk).
 
 ## 11. Emin olmadıklarım (uydurmadım)
 
-- Tepsi isteğinin gerçek niyeti (a) mı yoksa (c) mi?
-- Sahibinin terminalinde fare olayları geliyor mu?
-- `Kur` onaysız mı kalmalı (şu an öyle)?
-- Açık uçlu terminalde renk doğrulaması yapılmadı.
-- tview fare API'sinin tam adı uygulamada doğrulanacak.
+- Açık uçlu terminalde renk doğrulaması yapılmadı (`açık` palet göz onayı
+  bekliyor).
+- Fare gerçek yolu yalnızca sahibinin terminalinde doğrulanabilir (koşum
+  sentetik olay verir; §3'teki kanıt notuna bak).
+- `sistem` paletinde marka renklerinden vazgeçmek kabul mü?
 
 ## 12. Mockup'lar (verbatim, kutu genişlikleri denetlendi)
 
-Lejant: `►` seçim (ters video), `›` fare-hover (kalın), `*` onay ister,
+Lejant: `►` seçim (ters video), `›` fare-hover (kalın), `*` onay ister (çıkış dahil),
 `★` güncelleme mevcut. Renk mockup'ta görünmez.
 
 ### 120x30 · çalışıyor
@@ -348,7 +373,7 @@ Lejant: `►` seçim (ters video), `›` fare-hover (kalın), `*` onay ister,
 ░░░░░░░░░░░░░░░░░░░░║Bakım                                 ║░░░░░░░░░░░░░░░░░░░░
 ░░░░░░░░░░░░░░░░░░░░║► ★ Güncelle *                        ║░░░░░░░░░░░░░░░░░░░░
 ░░░░░░░░░░░░░░░░░░░░║  Onar *                              ║░░░░░░░░░░░░░░░░░░░░
-░░░░░░░░░░░░░░░░░░░░║  Kur                                 ║░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░║  Kur *                                ║░░░░░░░░░░░░░░░░░░░░
 ░░░░░░░░░░░░░░░░░░░░║  (* onay ister)                      ║░░░░░░░░░░░░░░░░░░░░
 ░░░░░░░░░░░░░░░░░░░░╚══════════════════════════════════════╝░░░░░░░░░░░░░░░░░░░░
 ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
@@ -360,6 +385,89 @@ Lejant: `►` seçim (ters video), `›` fare-hover (kalın), `*` onay ister,
 ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
  ↑↓ seç · Enter çalıştır · Esc geri                                             
+```
+### 80x24 · çıkış onayı (sahip kararı: `q` her zaman sorar)
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ OrPanel v1.4.5  tr/açık  12:00:00                                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░╔══════════════════════════════════════════╗░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░║Kapatılsın mı?                            ║░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░║                                          ║░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░║TUI kapanır; panel ve tepsi               ║░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░║arka planda çalışmaya                     ║░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░║devam eder.                               ║░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░║                                          ║░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░║[ kapat ]   [ vazgeç ]                    ║░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░╚══════════════════════════════════════════╝░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+ Tab seç · Enter onayla (vazgeç varsayılan) · Esc vazgeç                        
+```
+
+### 80x24 · palet ikizi (aynı kare: `koyu` / `açık` — fark başlıkta, ters-video metinde gösterilemez)
+koyu:
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ OrPanel v1.4.5  tr/koyu  12:00:00                                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌┤ Durum ├─────────────────────────────────────────────────────────────────────┐
+│Durum      ● Çalışıyor                                                        │
+│Versiyon   3.8.49                                                             │
+│Port       20128                                                              │
+│Node       24.20.0                                                            │
+│tepsi      açık                                                               │
+│yönetim    panel (:20127)                                                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+╔┤ ► İşlemler (6) ├════════════════════════════════════════════════════════════╗
+║► Durdur *                                                                    ║
+║  Yeniden Başlat *                                                            ║
+║  ★ Güncelle *                                                                ║
+║  Onar *                                                                      ║
+║  Web Arayüzü                                                                 ║
+║  … +3 daha ↓                                                                 ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+┌┤ Kayıtlar ▲ 5/5 ├────────────────────────────────────────────────────────────┐
+│[12:00:04] ERROR: sürüm sorgusu zaman aşımı                                   │
+│[12:00:05] INFO: yapılandırma kaydedildi                                      │
+└──────────────────────────────────────────────────────────────────────────────┘
+ ↑↓ seç · Enter çalıştır · Tab panel · ? yardım · q çık                         
+```
+açık:
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ OrPanel v1.4.5  tr/açık  12:00:00                                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌┤ Durum ├─────────────────────────────────────────────────────────────────────┐
+│Durum      ● Çalışıyor                                                        │
+│Versiyon   3.8.49                                                             │
+│Port       20128                                                              │
+│Node       24.20.0                                                            │
+│tepsi      açık                                                               │
+│yönetim    panel (:20127)                                                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+╔┤ ► İşlemler (6) ├════════════════════════════════════════════════════════════╗
+║► Durdur *                                                                    ║
+║  Yeniden Başlat *                                                            ║
+║  ★ Güncelle *                                                                ║
+║  Onar *                                                                      ║
+║  Web Arayüzü                                                                 ║
+║  … +3 daha ↓                                                                 ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+┌┤ Kayıtlar ▲ 5/5 ├────────────────────────────────────────────────────────────┐
+│[12:00:04] ERROR: sürüm sorgusu zaman aşımı                                   │
+│[12:00:05] INFO: yapılandırma kaydedildi                                      │
+└──────────────────────────────────────────────────────────────────────────────┘
+ ↑↓ seç · Enter çalıştır · Tab panel · ? yardım · q çık                         
 ```
 ### 80x24 · onay penceresi
 ```
@@ -392,5 +500,5 @@ Lejant: `►` seçim (ters video), `›` fare-hover (kalın), `*` onay ister,
 ## 13. Onay için sorular (sahibine)
 
 1. Tepsi denetimi mi istiyordu (a), yoksa tepsi menüsünü mü (c — mümkün değil)?
-2. Terminalinde fare olayları geliyor mu?
-3. `Kur` onaysız kalsın mı?
+2. Terminalinde fare olayları geliyor mu? (v1.4.5'te fare kapalıydı — §3)
+3. ~~`Kur` onaysız kalsın mı?~~ → karar: `Kur *` (onaylı) + `q` onaylı (§9b).
