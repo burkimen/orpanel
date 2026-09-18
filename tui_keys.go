@@ -67,6 +67,7 @@ func tuiActionRows(t map[string]string) []tuiRow {
 		{id: tuiActRestart, key: "r", text: tr("TuiRestart", "Restart")},
 		{id: tuiActUpdate, key: "u", text: tr("TuiUpdate", "Update")},
 		{id: tuiActRepair, key: "R", text: tr("TuiRepair", "Repair")},
+		{id: tuiActInstall, key: "i", text: tr("TuiInstall", "Install")},
 		{id: tuiActAutostart, key: "a", text: tr("TuiAutostart", "Autostart")},
 		{id: tuiActLanguage, key: "l", text: tr("TuiLanguage", "Language")},
 		{id: tuiActTheme, key: "t", text: tr("TuiTheme", "Theme")},

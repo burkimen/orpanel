@@ -208,14 +208,14 @@ func (a *tuiApp) footerTextLocked(width int) string {
 func (a *tuiApp) helpLines() []string {
 	var lines []string
 	lines = append(lines, tuiTr("TuiHelpActTitle", a.t, "Actions")+" ("+tuiTr("TuiConfirmLegend", a.t, "* needs confirm")+")")
-	for _, bd := range tuiActionBindings() {
-		lbl := tuiTr(bd.label, a.t, string(bd.key))
+	// Same slice the bar renders and Enter dispatches: st.rows.
+	for _, r := range a.st.rows {
 		mark := "  "
-		if bd.confirm {
+		if tuiConfirmNeeded(r.id) {
 			mark = " *"
 		}
 		// One row per action, key cap first: phrases never split.
-		lines = append(lines, fmt.Sprintf(" [%c] %s%s", bd.key, oneLine(lbl), mark))
+		lines = append(lines, fmt.Sprintf(" [%s] %s%s", r.key, oneLine(r.text), mark))
 	}
 	lines = append(lines, "")
 	// Navigation: two whole-pair rows (select/activate, pane/cancel) plus
@@ -417,11 +417,19 @@ func padToWidth(s string) string {
 }
 
 func (a *tuiApp) confirmAction(act int) {
-	b, _ := tuiBindingByAct(act)
-	lbl := tuiTr(b.label, a.t, string(b.key))
+	// Label comes from st.rows (the dispatched slice), never a parallel
+	// table: the modal names exactly what Enter is about to run.
+	key, lbl := "?", ""
+	for _, r := range a.st.rows {
+		if r.id == act {
+			key, lbl = r.key, r.text
+			break
+		}
+	}
 	// The modal names the action, its key, and the safe default (Esc).
-	body := fmt.Sprintf("[%c] %s\n%s", b.key, lbl, tuiTr("TuiConfirmTarget", a.t, "OmniRoute service"))
-	a.showModal(tuiTr("TuiConfirmTitle", a.t, "Confirm"), body+"?", tuiTr("TuiConfirmHint", a.t, "Enter confirm · Esc cancel"), []string{tuiTr("TuiConfirmOK", a.t, "confirm"), tuiTr("TuiConfirmCancel", a.t, "cancel")}, func() {
+	// Single-line action row: the modal box never wraps it mid-phrase.
+	body := fmt.Sprintf("[%s] %s?", key, lbl)
+	a.showModal(tuiTr("TuiConfirmTitle", a.t, "Confirm"), body, tuiTr("TuiConfirmHint", a.t, "Enter confirm · Esc cancel"), []string{tuiTr("TuiConfirmOK", a.t, "confirm"), tuiTr("TuiConfirmCancel", a.t, "cancel")}, func() {
 		msg := tuiDoAction(act, a.t)
 		a.setMsg(msg)
 	}, func() {
@@ -584,20 +592,20 @@ func (a *tuiApp) barText(width int) string {
 	return a.barTextLocked(width)
 }
 
-// barChips renders every action chip; the selected chip uses the reverse
-// attribute ([::r]) so it survives any palette, with ">"…"<" kept as the
-// non-colour signal for NO_COLOR and colour-blind users.
+// barChips renders one chip per st.rows entry — the same slice arrow
+// navigation and Enter dispatch index into. No parallel list may exist:
+// rendering, navigation, and dispatch share st.rows as the single source,
+// so a hidden chip can never shift the visible labels relative to the data.
 func (a *tuiApp) barChips() []string {
 	pane, sel := a.st.pane, a.st.sel
-	chips := make([]string, 0, len(tuiActionBindings()))
-	for i, b := range tuiActionBindings() {
-		lbl := tuiTr(b.label, a.t, string(b.key))
-		c := fmt.Sprintf("[%c] %s", b.key, lbl)
+	chips := make([]string, 0, len(a.st.rows))
+	for i, r := range a.st.rows {
+		c := fmt.Sprintf("[%s] %s", r.key, r.text)
 		if pane == tuiPaneActions && i == sel {
 			if tuiNoColor() {
 				c = ">" + c + "<"
 			} else {
-				c = "[::r]>" + c + "<[::-]"
+				c = "[::r]" + c + "[::-]"
 			}
 		}
 		chips = append(chips, c)

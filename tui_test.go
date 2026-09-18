@@ -200,7 +200,7 @@ func TestSimConfirmModal(t *testing.T) {
 	if !a.pages.HasPage("modal") {
 		t.Fatalf("confirm modal page missing")
 	}
-	// Names the action ([x] + label), its target, and the safe default.
+	// Names the action ([x] + label) and the safe default.
 	// Kept as the permanent visual gate for the destructive-action path.
 	if !strings.Contains(f, "[x]") {
 		t.Fatalf("confirm missing action key [x]:\n%s", f)
@@ -208,8 +208,8 @@ func TestSimConfirmModal(t *testing.T) {
 	if !strings.Contains(f, "Esc") {
 		t.Fatalf("confirm missing safe default Esc:\n%s", f)
 	}
-	if !strings.Contains(f, "OmniRoute") {
-		t.Fatalf("confirm missing action target:\n%s", f)
+	if !strings.Contains(f, "Durdur") && !strings.Contains(f, "Stop") {
+		t.Fatalf("confirm missing action label:\n%s", f)
 	}
 }
 
@@ -245,6 +245,76 @@ func TestBarOverflowMarker(t *testing.T) {
 		t.Fatalf("narrow bar has no overflow marker: %q", got)
 	}
 }
+
+// TestEnterDispatchesVisibleEntry: activating entry i dispatches
+// entries[i].actionID — render, navigation, and dispatch share st.rows, so
+// a hidden chip can never shift Enter onto its neighbour.
+func TestEnterDispatchesVisibleEntry(t *testing.T) {
+	a := tuiTestApp()
+	for i, r := range a.st.rows {
+		st := handleKey(tuiState{pane: tuiPaneActions, rows: a.st.rows, sel: i}, tuiKey{r: '\r'})
+		if r.id == tuiActHelp {
+			continue // help toggles instead of dispatching
+		}
+		if tuiConfirmNeeded(r.id) {
+			if st.confirm != r.id {
+				t.Fatalf("index %d (%q): confirm=%d want %d", i, r.text, st.confirm, r.id)
+			}
+			continue
+		}
+		if st.lastAct != r.id {
+			t.Fatalf("index %d (%q): dispatched=%d want %d", i, r.text, st.lastAct, r.id)
+		}
+	}
+}
+
+// TestBarLabelsMatchEntries: every rendered chip label equals the entry
+// label in order — no missing, extra, or empty entries.
+func TestBarLabelsMatchEntries(t *testing.T) {
+	for _, w := range []int{80, 120} {
+		a := tuiTestApp()
+		chips := a.barChips()
+		if len(chips) != len(a.st.rows) {
+			t.Fatalf("width %d: %d chips for %d entries", w, len(chips), len(a.st.rows))
+		}
+		for i, r := range a.st.rows {
+			if r.text == "" || r.key == "" {
+				t.Fatalf("entry %d renders empty: %+v", i, r)
+			}
+			if !strings.Contains(chips[i], "["+r.key+"]") || !strings.Contains(chips[i], r.text) {
+				t.Fatalf("chip %d = %q, want key %q label %q", i, chips[i], r.key, r.text)
+			}
+		}
+	}
+}
+
+// TestEnterBehindOverflowMarker: with chips hidden at 80 cols, the visible
+// entries still dispatch their own ids.
+func TestEnterBehindOverflowMarker(t *testing.T) {
+	a := tuiTestApp()
+	bar := a.barText(78)
+	if !strings.Contains(bar, "+") {
+		t.Fatalf("expected overflow marker at 78: %q", bar)
+	}
+	n := len(a.st.rows)
+	for _, i := range []int{0, 1, n - 1} {
+		r := a.st.rows[i]
+		st := handleKey(tuiState{pane: tuiPaneActions, rows: a.st.rows, sel: i}, tuiKey{r: '\r'})
+		if tuiConfirmNeeded(r.id) {
+			if st.confirm != r.id {
+				t.Fatalf("index %d: confirm=%d want %d", i, st.confirm, r.id)
+			}
+			continue
+		}
+		if r.id == tuiActHelp {
+			continue
+		}
+		if st.lastAct != r.id {
+			t.Fatalf("index %d: dispatched=%d want %d", i, st.lastAct, r.id)
+		}
+	}
+}
+
 func TestSimNonTTYFallback(t *testing.T) {
 	s := plainSummaryText()
 	if !strings.Contains(s, "orpanel v") {
