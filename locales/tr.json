@@ -118,5 +118,6 @@
   "UpdatePhaseFailed": "Güncelleme başarısız",
   "UpdateRestarting": "Panel yeniden başlatılıyor…",
   "UpdateWaitReturn": "Panelin dönmesi bekleniyor…",
-  "UpdateGone": "Panel yeniden başlatılıyor, bekleniyor…"
+  "UpdateGone": "Panel yeniden başlatılıyor, bekleniyor…",
+  "UpdateRefreshHint": "sayfayı yenileyebilirsiniz"
 }

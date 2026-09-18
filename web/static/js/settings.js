@@ -107,8 +107,8 @@ async function checkAndUpdate() {
         btn.onclick = async function() {
             btn.disabled = true;
             btn.innerHTML = '<span class="material-symbols-rounded">hourglass_top</span> ' + T.SettingUpdating;
-            showToast(T.SettingUpdating, 'info', 60000);
-            pollUpdateStatus(info, btn);
+            const startedToast = showToast(T.SettingUpdating, 'info', 60000);
+            pollUpdateStatus(info, btn, data.currentVersion, startedToast);
             try {
                 await fetch('/api/update/install', { method: 'POST' });
             } catch(e) {
@@ -132,9 +132,16 @@ function updatePhaseLabel(s) {
     return T.SettingUpdating;
 }
 
-async function pollUpdateStatus(info, btn) {
+async function pollUpdateStatus(info, btn, prevVersion, startedToast) {
     const started = Date.now();
     let goneSince = 0;
+    let lastPhase = '';
+    const finish = (text, type) => {
+        info.textContent = text;
+        if (startedToast && startedToast.remove) startedToast.remove();
+        showToast(text, type);
+        btn.disabled = false;
+    };
     const showProgress = (label) => {
         info.innerHTML = '<span class="material-symbols-rounded" style="vertical-align:-4px">hourglass_top</span> ' + label +
             '<span class="health-progress" style="display:block;margin-top:6px"><span class="health-progress-bar" style="width:100%"></span></span>';
@@ -148,33 +155,46 @@ async function pollUpdateStatus(info, btn) {
             s = await res.json();
         } catch(e) {
             if (!goneSince) goneSince = Date.now();
-            showProgress(T.UpdateGone);
-            if (Date.now() - started > 60000) {
-                info.textContent = T.SettingUpdateFailed;
-                showToast(T.SettingUpdateFailed, 'error');
-                btn.disabled = false;
+            showProgress(T.UpdateRestarting);
+            if (Date.now() - goneSince > 60000 || Date.now() - started > 180000) {
+                finish(T.SettingUpdateFailed + (lastPhase ? ' (' + lastPhase + ')' : '') + ' — ' + T.UpdateRefreshHint, 'error');
                 return;
             }
             continue;
         }
-        goneSince = 0;
-        if (s.phase === 'failed') {
-            info.textContent = updatePhaseLabel(s);
-            showToast(updatePhaseLabel(s), 'error');
-            btn.disabled = false;
+        if (s.currentVersion && prevVersion && s.currentVersion !== prevVersion) {
+            finish(T.SettingUpdateDone, 'ok');
+            location.reload();
             return;
         }
-        showProgress(updatePhaseLabel(s));
-        if (s.phase === 'restarting') {
+        const wasGone = goneSince > 0;
+        goneSince = 0;
+        if (s.phase === 'failed') {
+            finish(updatePhaseLabel(s), 'error');
+            return;
+        }
+        if (wasGone && s.currentVersion && prevVersion && s.currentVersion === prevVersion) {
             showProgress(T.UpdateRestarting);
-            await waitForPanelReturn(info, btn, started);
+            if (Date.now() - started > 180000) {
+                finish(T.SettingUpdateFailed + ' (' + updatePhaseLabel(s) + ') — ' + T.UpdateRefreshHint, 'error');
+                return;
+            }
+            continue;
+        }
+        lastPhase = updatePhaseLabel(s);
+        showProgress(lastPhase);
+        if (Date.now() - started > 180000) {
+            finish(T.SettingUpdateFailed + ' (' + lastPhase + ') — ' + T.UpdateRefreshHint, 'error');
             return;
         }
     }
 }
 
 async function waitForPanelReturn(info, btn, started) {
+    // Legacy helper, kept for compatibility; the version-derived completion
+    // in pollUpdateStatus supersedes it.
     info.textContent = T.UpdateWaitReturn;
+    const deadline = started + 60000;
     for (;;) {
         await new Promise(r => setTimeout(r, 750));
         try {
@@ -185,7 +205,7 @@ async function waitForPanelReturn(info, btn, started) {
                 return;
             }
         } catch(e) {}
-        if (Date.now() - started > 60000) {
+        if (Date.now() > deadline) {
             info.textContent = T.SettingUpdateFailed;
             showToast(T.SettingUpdateFailed, 'error');
             btn.disabled = false;
@@ -194,7 +214,3 @@ async function waitForPanelReturn(info, btn, started) {
         info.textContent = T.UpdateGone;
     }
 }
-
-checkAutoStart();
-loadSettings();
-loadLogRetention();

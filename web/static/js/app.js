@@ -12,6 +12,7 @@ function showToast(message, type = 'info', duration = 4000) {
     toast.innerHTML = '<span class="material-symbols-rounded">' + (icons[type] || 'info') + '</span><span>' + message + '</span>';
     container.appendChild(toast);
     setTimeout(() => { toast.classList.add('out'); setTimeout(() => toast.remove(), 300); }, duration);
+    return toast;
 }
 
 function switchTab(tabId, btn) {

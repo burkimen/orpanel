@@ -118,5 +118,6 @@
   "UpdatePhaseFailed": "Update failed",
   "UpdateRestarting": "Panel is restarting…",
   "UpdateWaitReturn": "Waiting for panel to return…",
-  "UpdateGone": "Panel is restarting, waiting…"
+  "UpdateGone": "Panel is restarting, waiting…",
+  "UpdateRefreshHint": "you can refresh the page"
 }
