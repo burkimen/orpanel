@@ -1297,10 +1297,27 @@ func updateTrayTexts() {
 	if mQuit != nil { mQuit.SetTitle(t["TrayQuit"]) }
 }
 
+// cleanStaleOldBinary removes a leftover <exe>.old from a previous Windows
+// swap, best-effort: in-use errors are ignored silently.
+func cleanStaleOldBinary() {
+	exe, err := os.Executable()
+	if err != nil || exe == "" {
+		return
+	}
+	old := exe + ".old"
+	if _, err := os.Stat(old); err != nil {
+		return
+	}
+	if err := os.Remove(old); err == nil {
+		writeLog("INFO: removed stale %s", filepath.Base(old))
+	}
+}
+
 func main() {
 	loadConfig()
 	initFileLog()
 	startLogCleanup()
+	cleanStaleOldBinary()
 	tInit := loadTranslations(getCurrentLang())
 	writeLog("%s", tInit["LogStarted"])
 
@@ -1313,7 +1330,6 @@ func main() {
 			showBanner()
 			fmt.Println("  Usage: orpanel [options]")
 			fmt.Println()
-			fmt.Println("  Options:")
 			fmt.Println("    --web      Open web UI in browser")
 			fmt.Println("    --tray     Start in system tray (background)")
 			fmt.Println("    --update   Check and install updates")
