@@ -40,6 +40,10 @@ irm https://raw.githubusercontent.com/burkimen/orpanel/main/scripts/install/inst
 
 Aynı komutu tekrar çalıştır — en son sürümü otomatik indirir.
 
+v1.3.3 ve sonrasında güncelleme panel çalışırken yapılabilir. Daha eski bir sürümdeyseniz, önce panelden çıkın (tepsi → Çıkış).
+
+Güncelleme başarısız olursa, güncelleme dizinindeki `apply_update.log` dosyasına bakın (Windows'ta `%LOCALAPPDATA%\Orpanel\update`). Başarısızlıkta eski sürüm otomatik geri yüklenir, arta kalan `orPanel.exe.old` dosyası bir sonraki başlatmada otomatik temizlenir.
+
 ### Kaldırma
 
 ```bash

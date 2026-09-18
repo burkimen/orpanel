@@ -40,6 +40,10 @@ irm https://raw.githubusercontent.com/burkimen/orpanel/main/scripts/install/inst
 
 Just run the same command again — it will download the latest version.
 
+From v1.3.3 onwards the update can run while the panel is running. If you are on an older build, quit the panel first (tray → Quit).
+
+If an update fails, check `apply_update.log` in the update directory (`%LOCALAPPDATA%\Orpanel\update` on Windows). The old version is restored automatically on failure, and a leftover `orPanel.exe.old` is cleaned up automatically on the next start.
+
 ### Uninstall
 
 ```bash

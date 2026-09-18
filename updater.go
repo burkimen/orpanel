@@ -36,9 +36,11 @@ const (
 )
 
 // releaseAsset maps a release asset file name to its browser download URL.
+// Size comes from the GitHub API and feeds the preflight + progress display.
 type releaseAsset struct {
 	Name string `json:"name"`
 	URL  string `json:"browser_download_url"`
+	Size int64  `json:"size"`
 }
 
 func githubGet(url string, timeout time.Duration) (*http.Response, error) {
@@ -52,39 +54,60 @@ func githubGet(url string, timeout time.Duration) (*http.Response, error) {
 }
 
 func getLatestReleaseInfo() (version, notes string, assets map[string]string, err error) {
+	full := getLatestReleaseFull()
+	if full.err != nil {
+		return "", "", nil, full.err
+	}
+	return full.version, full.notes, full.assets, nil
+}
+
+type releaseFull struct {
+	version string
+	notes   string
+	assets  map[string]string
+	sizes   map[string]int64
+	err     error
+}
+
+func getLatestReleaseFull() releaseFull {
+	version, notes, assets, sizes, err := fetchLatestRelease()
+	return releaseFull{version: version, notes: notes, assets: assets, sizes: sizes, err: err}
+}
+
+func fetchLatestRelease() (version, notes string, assets map[string]string, sizes map[string]int64, err error) {
 	req, err := http.NewRequest(http.MethodGet, githubLatestReleaseAPI, nil)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, nil, err
 	}
 	req.Header.Set("User-Agent", updaterUserAgent)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", "", nil, fmt.Errorf("GitHub API HTTP %d", resp.StatusCode)
+		return "", "", nil, nil, fmt.Errorf("GitHub API HTTP %d", resp.StatusCode)
 	}
-
 	var release struct {
 		TagName string         `json:"tag_name"`
 		Body    string         `json:"body"`
 		Assets  []releaseAsset `json:"assets"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return "", "", nil, err
+		return "", "", nil, nil, err
 	}
-
 	assets = make(map[string]string, len(release.Assets))
+	sizes = make(map[string]int64, len(release.Assets))
 	for _, a := range release.Assets {
 		if a.Name != "" && a.URL != "" {
 			assets[a.Name] = a.URL
+			sizes[a.Name] = a.Size
 		}
 	}
 	version = strings.TrimPrefix(release.TagName, "v")
-	return version, release.Body, assets, nil
+	return version, release.Body, assets, sizes, nil
 }
 
 // getAssetName returns the release asset file name for this OS/arch.

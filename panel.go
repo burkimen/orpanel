@@ -1355,32 +1355,16 @@ func main() {
 			systray.Run(onReady, onExit)
 			return
 		case "--update":
-			info := checkForUpdate()
-			if !info.UpdateAvailable {
-				fmt.Printf("Zaten güncel: v%s\n", info.CurrentVersion)
-				return
-			}
-			fmt.Printf("Güncelleme mevcut: v%s → v%s\n", info.CurrentVersion, info.LatestVersion)
-			fmt.Println("İndiriliyor...")
-			if err := performUpdate(); err != nil {
-				fmt.Printf("Hata: %v\n", err)
-				return
-			}
-			fmt.Println("Güncelleme tamamlandı!")
-			return
+			os.Exit(runCLIUpdate())
 		}
 	}
 
-	// No flags: interactive CLI menu.
-	// If stdin is not a terminal (double-click, hidden window), start tray directly.
-	if !isTerminal() {
-		detachFromConsole()
-		startWatchdog()
-		go startWebServer()
-		systray.Run(onReady, onExit)
+	// No flags: full-screen TUI on a terminal, plain summary when headless.
+	if !isTerminal() || !isTerminalOut() {
+		printPlainSummary()
 		return
 	}
-	runCLI()
+	runTUI()
 }
 
 func isTerminal() bool {
