@@ -202,20 +202,21 @@ func (a *tuiApp) footerTextLocked(width int) string {
 }
 
 
-// helpLines returns the help modal as whole lines: one row per action
-// ("[key] label", destructive marked with *), navigation hints joined
+// helpLines returns the help modal as whole lines: one compact row per
+// action ("key label", destructive marked with *), navigation hints joined
 // into whole pairs. Short enough that the modal (lines+6) fits 80x24.
 func (a *tuiApp) helpLines() []string {
 	var lines []string
 	lines = append(lines, tuiTr("TuiHelpActTitle", a.t, "Actions")+" ("+tuiTr("TuiConfirmLegend", a.t, "* needs confirm")+")")
 	// Same slice the bar renders and Enter dispatches: st.rows.
+	// Compact "key label[*]": no keycap brackets (tview tags), no padding
+	// that the modal width-fitter can wrap mid-row.
 	for _, r := range a.st.rows {
-		mark := "  "
+		mark := ""
 		if tuiConfirmNeeded(r.id) {
 			mark = " *"
 		}
-		// One row per action, key cap first: phrases never split.
-		lines = append(lines, fmt.Sprintf(" [%s] %s%s", r.key, oneLine(r.text), mark))
+		lines = append(lines, fmt.Sprintf(" %s %s%s", r.key, oneLine(r.text), mark))
 	}
 	lines = append(lines, "")
 	// Navigation: two whole-pair rows (select/activate, pane/cancel) plus
@@ -428,7 +429,8 @@ func (a *tuiApp) confirmAction(act int) {
 	}
 	// The modal names the action, its key, and the safe default (Esc).
 	// Single-line action row: the modal box never wraps it mid-phrase.
-	body := fmt.Sprintf("[%s] %s?", key, lbl)
+	// Keycap "s[NBSP]": not a tview tag, renders literally either way.
+	body := fmt.Sprintf("[%s ] %s?", key, lbl)
 	a.showModal(tuiTr("TuiConfirmTitle", a.t, "Confirm"), body, tuiTr("TuiConfirmHint", a.t, "Enter confirm · Esc cancel"), []string{tuiTr("TuiConfirmOK", a.t, "confirm"), tuiTr("TuiConfirmCancel", a.t, "cancel")}, func() {
 		msg := tuiDoAction(act, a.t)
 		a.setMsg(msg)
@@ -600,7 +602,9 @@ func (a *tuiApp) barChips() []string {
 	pane, sel := a.st.pane, a.st.sel
 	chips := make([]string, 0, len(a.st.rows))
 	for i, r := range a.st.rows {
-		c := fmt.Sprintf("[%s] %s", r.key, r.text)
+		// Keycap "s[NBSP]": not a tview tag, renders literally with
+		// colors on AND off — no Escape (which leaves a "[]" residue).
+		c := fmt.Sprintf("[%s ] %s", r.key, r.text)
 		if pane == tuiPaneActions && i == sel {
 			if tuiNoColor() {
 				c = ">" + c + "<"

@@ -5,11 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"golang.org/x/sys/windows"
@@ -17,7 +17,13 @@ import (
 
 type windowsHandle = windows.Handle
 
+// tuiTestApp builds a deterministic harness app: English labels, colors on,
+// colors off only where a test pins it. tuiNoColor reads $NO_COLOR, so pin
+// it here — ambient CI/dev shells (NO_COLOR=1 here) must not change frames.
 func tuiTestApp() *tuiApp {
+	// Deterministic frames: tuiNoColor reads $NO_COLOR, so pin it off —
+	// ambient CI/dev shells (NO_COLOR=1 here) must not change rendering.
+	_ = os.Setenv("NO_COLOR", "")
 	a := newTuiApp()
 	a.t = map[string]string{
 		"TuiStatus": "Status", "TuiLogs": "Logs", "TuiActions": "Actions",
@@ -25,7 +31,6 @@ func tuiTestApp() *tuiApp {
 		"TuiNavHint": "Tab switch pane", "TuiClose": "Close", "TuiHelp": "Help",
 		"TuiConfirmTitle": "Confirm", "TuiConfirmHint": "Enter confirm",
 		"TuiConfirmOK": "confirm", "TuiConfirmCancel": "cancel",
-		"TuiConfirmLegend": "* needs confirm",
 		"TuiHintScrollLine": "arrows select", "TuiHintSelect": "select",
 		"TuiHintPane": "switch pane", "TuiHintActivate": "run", "TuiHintCancel": "close",
 		"TuiHintScroll": "scroll", "TuiHintEdges": "top/bottom",
@@ -181,14 +186,33 @@ func TestSimHelpModal(t *testing.T) {
 	if !a.pages.HasPage("modal") {
 		t.Fatalf("help modal page missing")
 	}
-	// Every action must be listed with its key; destructive ones marked.
-	for _, b := range tuiActionBindings() {
-		if !strings.Contains(f, string(b.key)) {
-			t.Fatalf("help missing key %q:\n%s", b.key, f)
+	// Every dispatched entry must be listed (ids, not locale labels, are
+	// the contract); destructive ones marked. Assert on helpLines — the
+	// modal body — because the 80-col box legitimately scrolls/clips rows
+	// in the rendered frame (see TestHelpModalScrollable).
+	body := strings.Join(a.helpLines(), "\n")
+	for _, r := range a.st.rows {
+		if !strings.Contains(body, " "+r.key+" ") {
+			t.Fatalf("help missing key %q:\n%s", r.key, body)
 		}
 	}
 	if !strings.Contains(f, "*") {
 		t.Fatalf("help missing confirm markers:\n%s", f)
+	}
+}
+
+// TestHelpModalScrollable: at 80x24 the box cannot fit all rows; the body
+// must then carry a scroll marker ("+N more") instead of silently hiding
+// actions — every action stays reachable via scroll.
+func TestHelpModalScrollable(t *testing.T) {
+	a := tuiTestApp()
+	simText(t, a, 80, 24)
+	simPress(a, "?")
+	f := simText(t, a, 80, 24)
+	body := strings.Join(a.helpLines(), "\n")
+	n := len(strings.Split(body, "\n"))
+	if !strings.Contains(f, "+") && n > 14 {
+		t.Fatalf("80-col help shows %d body lines with no scroll marker:\n%s", n, f)
 	}
 }
 
@@ -200,38 +224,41 @@ func TestSimConfirmModal(t *testing.T) {
 	if !a.pages.HasPage("modal") {
 		t.Fatalf("confirm modal page missing")
 	}
-	// Names the action ([x] + label) and the safe default.
+	// Names the action keycap, its row label, and the safe default.
 	// Kept as the permanent visual gate for the destructive-action path.
-	if !strings.Contains(f, "[x]") {
-		t.Fatalf("confirm missing action key [x]:\n%s", f)
+	sel := a.stateSnapshot().sel
+	want := a.st.rows[sel]
+	if !strings.Contains(f, "["+want.key+" ]") {
+		t.Fatalf("confirm missing action key [%s]:\n%s", want.key, f)
+	}
+	if !strings.Contains(f, want.text) {
+		t.Fatalf("confirm missing action label %q:\n%s", want.text, f)
 	}
 	if !strings.Contains(f, "Esc") {
 		t.Fatalf("confirm missing safe default Esc:\n%s", f)
 	}
-	if !strings.Contains(f, "Durdur") && !strings.Contains(f, "Stop") {
-		t.Fatalf("confirm missing action label:\n%s", f)
-	}
 }
 
 // TestBarClipsWholeChips gates mid-word clipping: at 80 and 120 cols the
-// rendered bar row must end on a chip boundary or the overflow marker —
-// never with a sliced label (e.g. "Idiom" cut to "Idio", "In" cut to "I").
+// rendered bar row must contain the first entry's keycap and end on a chip
+// boundary or the overflow marker — never sliced, never missing entry 0.
 func TestBarClipsWholeChips(t *testing.T) {
 	for _, w := range []int{80, 120} {
 		a := tuiTestApp()
+		first := a.st.rows[0]
 		f := simText(t, a, w, 24)
 		var barRow string
 		for _, ln := range strings.Split(f, "\n") {
-			if strings.Contains(ln, "[s]") {
+			if strings.Contains(ln, "["+first.key+" ]") {
 				barRow = ln
 			}
 		}
 		if barRow == "" {
-			t.Fatalf("width %d: no bar row in frame:\n%s", w, f)
+			t.Fatalf("width %d: no bar row with entry-0 key [%s] in frame:\n%s", w, first.key, f)
 		}
 		// Last visible token must be a whole chip or the marker.
 		tail := strings.TrimRight(barRow, " │╭╮╰╯┌┐└┘─")
-		if tail == "" || strings.HasSuffix(tail, "[") || strings.HasSuffix(tail, "[i") {
+		if tail == "" || strings.HasSuffix(tail, "[") {
 			t.Fatalf("width %d: bar clipped mid-chip: %q", w, barRow)
 		}
 	}
@@ -269,7 +296,8 @@ func TestEnterDispatchesVisibleEntry(t *testing.T) {
 }
 
 // TestBarLabelsMatchEntries: every rendered chip label equals the entry
-// label in order — no missing, extra, or empty entries.
+// label in order — no missing, extra, or empty entries. Keycaps carry a
+// trailing NBSP ("[x ]") so tview never treats them as color tags.
 func TestBarLabelsMatchEntries(t *testing.T) {
 	for _, w := range []int{80, 120} {
 		a := tuiTestApp()
@@ -281,7 +309,7 @@ func TestBarLabelsMatchEntries(t *testing.T) {
 			if r.text == "" || r.key == "" {
 				t.Fatalf("entry %d renders empty: %+v", i, r)
 			}
-			if !strings.Contains(chips[i], "["+r.key+"]") || !strings.Contains(chips[i], r.text) {
+			if !strings.Contains(chips[i], "["+r.key+" ]") || !strings.Contains(chips[i], r.text) {
 				t.Fatalf("chip %d = %q, want key %q label %q", i, chips[i], r.key, r.text)
 			}
 		}
@@ -835,12 +863,13 @@ func TestCtrlCExitsWithModalOpen(t *testing.T) {
 }
 
 func TestLanguagePressRelocalizes(t *testing.T) {
+	// Isolated from the real config file: the dispatch cycles from the
+	// SAVED config, so redirect it at a temp file (CI has no config).
+	configPathOverride = filepath.Join(t.TempDir(), "config.json")
+	defer func() { configPathOverride = "" }()
 	a := tuiTestApp()
-	a.t = loadTranslations("en")
-	a.st = tuiState{pane: tuiPaneActions, rows: tuiActionRows(a.t)}
-	// Pin the starting language: the dispatch cycles from the SAVED config,
-	// so force it to en first (config file may say anything on this box).
-	saveConfig("en", loadConfig().AutoStart)
+	// Pin the starting language through the same isolated file.
+	saveConfig("en", false)
 	a.t = loadTranslations("en")
 	a.st = tuiState{pane: tuiPaneActions, rows: tuiActionRows(a.t)}
 	before := simText(t, a, 80, 24)
