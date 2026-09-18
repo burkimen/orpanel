@@ -91,22 +91,45 @@ func TestWindowsSwapOwnerTrap(t *testing.T) {
 	if err := copyFile(self, staged); err != nil {
 		t.Fatal(err)
 	}
-	// Sleeper: re-exec this test binary so it sits mapped on app.exe.
-	sleeper := exec.Command(app)
+	// Sleeper: re-exec this test binary gated to a helper that only sleeps,
+	// so the child sits mapped on app.exe with no suite running inside it.
+	sleeper := exec.Command(app, "-test.run=TestHelperSwapSleeper")
 	sleeper.Env = append(os.Environ(), "ORPANEL_SWAP_SLEEPER=1")
 	if err := sleeper.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = sleeper.Process.Kill() }()
-	waitFor := time.Now().Add(10 * time.Second)
-	for {
-		if _, err := os.Stat(lockProbePath(app)); err == nil {
-			break
+	// stopSleeper kills the child AND waits for the OS to release its
+	// mapped image. Kill alone is async: without the wait, TempDir
+	// removal races the teardown and fails with "Erişim engellendi."
+	stopSleeper := func() {
+		if sleeper.Process == nil {
+			return
 		}
-		_ = app
-		break
+		_ = sleeper.Process.Kill()
+		done := make(chan struct{})
+		go func() {
+			_, _ = sleeper.Process.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+		}
 	}
-	_ = waitFor
+	// Runs BEFORE t.TempDir's own RemoveAll (LIFO): child is reaped and
+	// the dir is removed tolerantly, so the swap assertions stay the
+	// thing under test even on failure paths.
+	t.Cleanup(func() {
+		stopSleeper()
+		var err error
+		for i := 0; i < 10; i++ {
+			if err = os.RemoveAll(dir); err == nil {
+				return
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		t.Errorf("sandbox %s still locked after sleeper exit (holder pid %d): %v", dir, sleeper.Process.Pid, err)
+	})
 	time.Sleep(500 * time.Millisecond)
 	// Recreate the owner's state: previous swap renamed the live image to
 	// app.exe.old (allowed), then a fresh app.exe arrived (copy).
@@ -154,7 +177,8 @@ func TestWindowsSwapOwnerTrap(t *testing.T) {
 	if len(stamps) >= 2 && stamps[len(stamps)-1].Sub(stamps[0]) < 1500*time.Millisecond {
 		t.Fatalf("backoff did not wait (span %v); timeout-style spin?", stamps[len(stamps)-1].Sub(stamps[0]))
 	}
-	_ = sleeper.Process.Kill()
+	// No explicit kill here: t.Cleanup's stopSleeper (kill + Wait +
+	// tolerant RemoveAll) owns teardown on every path, including failures.
 }
 
 func copyFile(src, dst string) error {
@@ -183,4 +207,12 @@ func logTimestamps(t *testing.T, log string) []time.Time {
 		}
 	}
 	return out
+}
+
+// TestHelperSwapSleeper is not a real test: the trap re-execs the test
+// binary gated to this name so the child sits mapped on app.exe running
+// NO suite code (no TempDir cleanup of its own, no test server, no log
+// writes). It must stay trivial: sleep until killed.
+func TestHelperSwapSleeper(t *testing.T) {
+	time.Sleep(60 * time.Second)
 }
