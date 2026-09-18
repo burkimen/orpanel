@@ -243,6 +243,113 @@ func processCommandLine(pid int) (string, bool) {
 
 var processCommandLineFn = processCommandLine
 
+// processImagePath returns the executable image path of pid. Windows reads
+// Win32_Process.ExecutablePath (the on-disk image, which may be a renamed-
+// aside "orPanel.exe.old*" after a swap); unix reads /proc/<pid>/exe.
+func processImagePath(pid int) (string, bool) {
+	if runtime.GOOS == "windows" {
+		psCmd := fmt.Sprintf("Get-CimInstance Win32_Process -Filter 'ProcessId=%d' | Select-Object -ExpandProperty ExecutablePath", pid)
+		c := exec.Command("powershell", "-NoProfile", "-Command", psCmd)
+		hideWindow(c)
+		out, err := c.Output()
+		if err != nil {
+			return "", false
+		}
+		if p := strings.TrimSpace(string(out)); p != "" {
+			return p, true
+		}
+		return "", false
+	}
+	if target, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid)); err == nil && strings.TrimSpace(target) != "" {
+		return target, true
+	}
+	return "", false
+}
+
+var processImagePathFn = processImagePath
+
+// isOwnPanelProcess reports whether pid runs our own binary from the install
+// directory. It matches BOTH the normal image name and renamed-aside images
+// ("orPanel.exe.old*"): after a swap the live process's image path can be
+// exactly orPanel.exe.old, and the new instance must still recognize it as
+// its predecessor. Fail-closed: unknown image means not ours.
+func isOwnPanelProcess(pid int, exe string) bool {
+	if exe == "" {
+		return false
+	}
+	img, ok := processImagePathFn(pid)
+	if !ok || strings.TrimSpace(img) == "" {
+		return false
+	}
+	dirImg, dirExe := filepath.Dir(img), filepath.Dir(exe)
+	if runtime.GOOS == "windows" {
+		if !strings.EqualFold(dirImg, dirExe) {
+			return false
+		}
+		return baseIsOwnPanelImage(filepath.Base(img), filepath.Base(exe))
+	}
+	if dirImg != dirExe {
+		return false
+	}
+	return baseIsOwnPanelImage(filepath.Base(img), filepath.Base(exe))
+}
+
+func baseIsOwnPanelImage(base, want string) bool {
+	if runtime.GOOS == "windows" {
+		base, want = strings.ToLower(base), strings.ToLower(want)
+	}
+	return base == want || strings.HasPrefix(base, want+".old")
+}
+
+func killOwnPanelPid(pid int, exe string) bool {
+	if pid == os.Getpid() || pid < 100 {
+		return false
+	}
+	if !isOwnPanelProcess(pid, exe) {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		c := exec.Command("taskkill", "/F", "/PID", strconv.Itoa(pid))
+		hideWindow(c)
+		return c.Run() == nil
+	}
+	return exec.Command("kill", "-9", strconv.Itoa(pid)).Run() == nil
+}
+
+// reclaimPanelPort stops prior instances of our own binary that hold port
+// and waits for the port to free, bounded. Holders that are NOT ours are
+// left alone (false) so a foreign process is never killed. Sandbox-safe:
+// only pids reported for port are touched, each ownership-checked first.
+var collectPortPidsFn = collectPortPids
+
+func reclaimPanelPort(port int, exe string) bool {
+	for i := 0; i < 6; i++ {
+		if !isPortInUse(port) {
+			return true
+		}
+		holders := collectPortPidsFn(port)
+		if len(holders) == 0 {
+			time.Sleep(time.Second)
+			continue
+		}
+		anyOwn := false
+		for _, pid := range holders {
+			if isOwnPanelProcess(pid, exe) {
+				anyOwn = true
+				writeLog("WARN: panel port %d held by prior panel pid %d, stopping it", port, pid)
+				killOwnPanelPid(pid, exe)
+			} else {
+				writeLog("WARN: pid %d on panel port %d is foreign, leaving process running", pid, port)
+			}
+		}
+		if !anyOwn {
+			return false
+		}
+		time.Sleep(time.Second)
+	}
+	return !isPortInUse(port)
+}
+
 func ownedByOmniroute(pid int) bool {
 	cmdline, ok := processCommandLineFn(pid)
 	if !ok || strings.TrimSpace(cmdline) == "" {
@@ -1277,9 +1384,18 @@ func startWebServer() {
 	addr := "127.0.0.1:" + strconv.Itoa(PanelPort)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		writeLog("ERROR: panel listen failed addr=%s err=%v", addr, err)
-		fmt.Fprintf(os.Stderr, "ERROR: panel listen failed addr=%s err=%v\n", addr, err)
-		os.Exit(1)
+		// A prior orPanel instance may still hold the port (e.g. running
+		// from a renamed-aside orPanel.exe.old* image after a swap).
+		// Reclaim only our own binary; a foreign holder keeps today's
+		// behavior (log and exit), never a kill.
+		if exe, xerr := os.Executable(); xerr == nil && exe != "" && reclaimPanelPort(PanelPort, exe) {
+			ln, err = net.Listen("tcp", addr)
+		}
+		if err != nil {
+			writeLog("ERROR: panel listen failed addr=%s err=%v", addr, err)
+			fmt.Fprintf(os.Stderr, "ERROR: panel listen failed addr=%s err=%v\n", addr, err)
+			os.Exit(1)
+		}
 	}
 	if err := http.Serve(ln, guardMiddleware(mux)); err != nil {
 		writeLog("ERROR: panel listen failed addr=%s err=%v", addr, err)
