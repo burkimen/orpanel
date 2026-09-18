@@ -153,6 +153,21 @@ func TestUpdatePhaseMachine(t *testing.T) {
 	setUpdatePhase(updateIdle, "", "", "")
 }
 
+func TestUpdateStatusReportsRunningVersion(t *testing.T) {
+	updateMu.Lock()
+	updateCur = ""
+	updatePhaseNow = updateIdle
+	updateMu.Unlock()
+	defer setUpdatePhase(updateIdle, "", "", "")
+	if got := getUpdateStatus(); got.CurrentVersion != getCurrentVersion() {
+		t.Fatalf("idle currentVersion=%q want running %q", got.CurrentVersion, getCurrentVersion())
+	}
+	setUpdatePhase(updateVerifying, "1.2.9", "1.3.1", "")
+	if got := getUpdateStatus(); got.CurrentVersion != "1.2.9" {
+		t.Fatalf("in-flight currentVersion=%q want 1.2.9", got.CurrentVersion)
+	}
+}
+
 func TestUpdateStatusHandler(t *testing.T) {
 	setUpdatePhase(updateDownloading, "1.0.0", "1.0.1", "")
 	defer setUpdatePhase(updateIdle, "", "", "")

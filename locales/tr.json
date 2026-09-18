@@ -119,5 +119,6 @@
   "UpdateRestarting": "Panel yeniden başlatılıyor…",
   "UpdateWaitReturn": "Panelin dönmesi bekleniyor…",
   "UpdateGone": "Panel yeniden başlatılıyor, bekleniyor…",
-  "UpdateRefreshHint": "sayfayı yenileyebilirsiniz"
+  "UpdateRefreshHint": "sayfayı yenileyebilirsiniz",
+  "UpdateSameVersion": "Panel aynı sürümle döndü — güncelleme uygulanmamış olabilir"
 }

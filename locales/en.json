@@ -119,5 +119,6 @@
   "UpdateRestarting": "Panel is restarting…",
   "UpdateWaitReturn": "Waiting for panel to return…",
   "UpdateGone": "Panel is restarting, waiting…",
-  "UpdateRefreshHint": "you can refresh the page"
+  "UpdateRefreshHint": "you can refresh the page",
+  "UpdateSameVersion": "Panel is back with the same version — the update may not have applied"
 }

@@ -162,6 +162,15 @@ async function pollUpdateStatus(info, btn, prevVersion, startedToast) {
             }
             continue;
         }
+        if (s.phase === 'idle' && s.currentVersion && prevVersion && s.currentVersion === prevVersion) {
+            if (!goneSince) goneSince = Date.now();
+            showProgress(T.UpdateRestarting);
+            if (Date.now() - goneSince > 20000 || Date.now() - started > 180000) {
+                finish(T.UpdateSameVersion, 'error');
+                return;
+            }
+            continue;
+        }
         if (s.currentVersion && prevVersion && s.currentVersion !== prevVersion) {
             finish(T.SettingUpdateDone, 'ok');
             location.reload();

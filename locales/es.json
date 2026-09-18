@@ -119,5 +119,6 @@
   "UpdateRestarting": "El panel se está reiniciando…",
   "UpdateWaitReturn": "Esperando que vuelva el panel…",
   "UpdateGone": "El panel se está reiniciando, esperando…",
-  "UpdateRefreshHint": "puedes recargar la página"
+  "UpdateRefreshHint": "puedes recargar la página",
+  "UpdateSameVersion": "El panel volvió con la misma versión — es posible que la actualización no se aplicara"
 }

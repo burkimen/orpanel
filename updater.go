@@ -379,10 +379,14 @@ func getUpdateStatus() updateStatus {
 	if !updateAt.IsZero() {
 		updated = updateAt.UTC().Format(time.RFC3339)
 	}
+	cur := updateCur
+	if cur == "" {
+		cur = getCurrentVersion()
+	}
 	return updateStatus{
 		Phase:          updatePhaseNow,
 		Error:          updateErr,
-		CurrentVersion: updateCur,
+		CurrentVersion: cur,
 		LatestVersion:  updateLat,
 		StartedAt:      started,
 		UpdatedAt:      updated,
