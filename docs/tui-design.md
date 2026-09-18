@@ -84,10 +84,54 @@ Gerçeklik: TUI bazen panele istemci bağlanır; tepsi ayrı bir süreçtir.
   sürecinin mesaj döngüsüne aittir, başka süreçten çağrılamaz. Dürüst cevap.
 - (d) Yalnızca tepsi ayarları (otomatik başlat): zaten var, en ucuz ama
   isteği karşılamaz.
-Öneri: (a) + (d) — Durum odasında `tepsi: açık/kapalı` satırı + İşlemler'de
-`Tepsi` aç/kapa eylemi. Sahibine sorulacak: tepsi denetimi mi istiyordu?
+Karar: §8'e taşındı (tepsiyi durdurmak sunulmuyor; yalnızca rapor + otomatik başlat).
 
-## 7. Emin olmadıklarım (uydurmadım)
+## 8. Tepsi/panel önyükleme (argümansız açılış kusuru)
+
+Kusur: `orpanel` (argümansız) TUI açar ama tepsi/panel süreci başlatmaz;
+kullanıcı çıkıp ayrıca `orpanel --tray` koşmak zorunda. Tasarım: argümansız
+açılışta önce 127.0.0.1:20127 yoklanır (kısa zaman aşımı, mevcut panel
+yoklama yardımcısı). Yanıt varsa ona istemci bağlanılır. Yanıt yoksa aynı
+ikili `--tray` ile ayrık başlatılır (`spawnDetached`: DETACHED_PROCESS |
+CREATE_NEW_PROCESS_GROUP, pencere gizli — `--tray` yolunun aynısı), sonra
+TUI istemci olarak açılır. Böylece simge ilk kareden vardır.
+- Durum odası her zaman yazar: `yönetim: panel (:20127)` (istemci) ya da
+  `yönetim: bu süreç` (doğrudan). Belirsiz durum yok.
+- Tepsiyi TUI içinden DURDURMAK sunulmaz: tepsiyi durdurmak bekçi
+  sürecini (watchdog) da öldürür; bu, paneli bilinçli olarak başsız
+  bırakmaktır. Tasarımda İşlemler'de `Tepsi` aç/kapa eylemi YOKTUR.
+  Öneri değişti (§6'daki (a) geri çekildi): tepsi yalnızca Durum satırında
+  `tepsi: açık/kapalı` diye raporlanır + `Otomatik Başlat` ayarı kalır.
+  Gerekçe: kazara tıklanan bir `Tepsi'yi durdur`, gözetimsiz panel + ölü
+  bekçi bırakır; onayı bile olsa maliyeti faydasını aşar.
+
+## 9. Menü gruplama (eylem listesi)
+
+Sahibi kritik/yıkıcı işlemlerin karışık listede durmasını istemiyor.
+Üst düzey İşlemler yalnızca durum eylemlerini + iki grup girişini taşır
+(çalışıyor durumunda: Durdur, Yeniden Başlat, ▸ Bakım, ▸ Ayarlar).
+- `▸ Bakım` bir alt liste/modal açar: Kur, Onar, Güncelle (üçü de onaylı).
+- `▸ Ayarlar` bir alt liste/modal açar: Otomatik Başlat (aç/kapa),
+  Dil (döngü), Tema (döngü), Web Arayüzü.
+- Davranış: grup satırında Enter/fare-tık grubu açar; grup içinde Esc bir
+  üst düzeye döner (uygulamadan çıkmaz). Fare tekerleği grup listesinde de
+  kaydırır. Yardım ekranı grupları açık yazar (örn. `Bakım ▸ Onar *`).
+- Mockup'lar (§12) güncellendi: işlem odası grup başlıklı dikey listedir.
+
+## 10. İstemci modunda kayıt odası (boş kutu kusuru)
+
+Kusur: TUI kendi sürecindeki `logBuffer`'ı çizer; panele istemci bağlıyken
+kayıtlar sunucu süreçtedir, bu yüzden `Kayıtlar` yapısal olarak boş görünür.
+Tasarım: istemci modunda kayıt odası panelin mevcut uç noktasını yoklar:
+`GET /api/logs?last=N` → `{logs: [...], newIndex: M}` (panel.go'daki
+mevcut imza; `last` kaçırılan ön-ek dizinidir, `newIndex` toplam uzunluk).
+- Yoklama artan `last=newIndex` ile yapılır (tamponu baştan çekmek yok);
+  doğrudan modda yalnızca süreç-içi tampon kullanılır.
+- Oda her zaman açık durum yazar: `yükleniyor…` (ilk yoklama öncesi),
+  `kayıt yok — panel yeni başladı` (boş yanıt), asla boş kutu yok.
+- Başlık sayacı sunucu dizininden gelir (`Kayıtlar ▲ newIndex-son`).
+
+## 11. Emin olmadıklarım (uydurmadım)
 
 - Tepsi isteğinin gerçek niyeti (a) mı yoksa (c) mi?
 - Sahibinin terminalinde fare olayları geliyor mu?
@@ -95,12 +139,10 @@ Gerçeklik: TUI bazen panele istemci bağlanır; tepsi ayrı bir süreçtir.
 - Açık uçlu terminalde renk doğrulaması yapılmadı.
 - tview fare API'sinin tam adı uygulamada doğrulanacak.
 
-## 8. Mockup'lar (verbatim, kutu genişlikleri denetlendi)
+## 12. Mockup'lar (verbatim, kutu genişlikleri denetlendi)
 
 Lejant: `►` seçim (ters video), `›` fare-hover (kalın), `*` onay ister,
 `★` güncelleme mevcut. Renk mockup'ta görünmez.
-
-### 120x30 · çalışıyor
 
 ### 120x30 · çalışıyor
 ```
@@ -267,6 +309,58 @@ Lejant: `►` seçim (ters video), `›` fare-hover (kalın), `*` onay ister,
  Esc kapat · q çık                                                              
 ```
 
+
+### 120x30 · gruplu işlemler (çalışıyor) + istemci kayıt başlığı
+```
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ OrPanel v1.4.5  OmniRoute 3.8.49  tr/koyu  12:00:00                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+╔┤ ► Durum ├═══════════════════════════════╗┌┤ Kayıtlar ▲ 3/3 (panel) ├────────────────────────────────────────────────┐
+║Durum      ● Çalışıyor                    ║│[12:00:01] INFO: panel başladı                                            │
+║Versiyon   3.8.49                         ║│[12:00:02] INFO: sağlık sondası yanıt verdi (200)                         │
+║Port       20128                          ║│[12:00:03] WARN: kurtarma beklemesi aktif (3 deneme)                      │
+║Node       24.20.0                        ║│                                                                          │
+║tepsi      açık                           ║│                                                                          │
+║yönetim    panel (:20127)                 ║│                                                                          │
+║                                          ║│                                                                          │
+║                                          ║│                                                                          │
+╚══════════════════════════════════════════╝│                                                                          │
+╔┤ ► İşlemler (4) ├════════════════════════╗│                                                                          │
+║► Durdur *                                ║│                                                                          │
+║  Yeniden Başlat *                        ║│                                                                          │
+║  ▸ Bakım …                               ║│                                                                          │
+║  ▸ Ayarlar …                             ║│                                                                          │
+╚══════════════════════════════════════════╝└──────────────────────────────────────────────────────────────────────────┘
+ ↑↓ seç · Enter aç/çalıştır · Tab panel · ? yardım · q çık                                                              
+```
+
+### 80x24 · Bakım alt grubu (Enter/⊕ tık ile açılır, Esc geri döner)
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ OrPanel v1.4.5  tr/koyu  12:00:00                                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░╔══════════════════════════════════════╗░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░║Bakım                                 ║░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░║► ★ Güncelle *                        ║░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░║  Onar *                              ║░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░║  Kur                                 ║░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░║  (* onay ister)                      ║░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░╚══════════════════════════════════════╝░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+ ↑↓ seç · Enter çalıştır · Esc geri                                             
+```
 ### 80x24 · onay penceresi
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -295,7 +389,7 @@ Lejant: `►` seçim (ters video), `›` fare-hover (kalın), `*` onay ister,
  Enter onayla · Esc vazgeç                                                      
 ```
 
-## 9. Onay için sorular (sahibine)
+## 13. Onay için sorular (sahibine)
 
 1. Tepsi denetimi mi istiyordu (a), yoksa tepsi menüsünü mü (c — mümkün değil)?
 2. Terminalinde fare olayları geliyor mu?
