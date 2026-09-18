@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -83,6 +84,7 @@ type tuiApp struct {
 	bar       *tview.TextView
 	header    *tview.TextView
 	footer    *tview.TextView
+	mu        sync.Mutex // guards st/msg/probe/focus-class below; event loop vs tick/test
 	msg       string
 	msgAt     time.Time
 	st        tuiState
@@ -96,6 +98,26 @@ type tuiApp struct {
 	lastH     int
 	snap      tuiSnapshot // last rendered snapshot (sim harness reads it)
 	ttooSmall string      // cached too-small text for the sim guard
+}
+// tuiStateSnapshot copies selection-relevant state for race-safe test reads.
+func (a *tuiApp) stateSnapshot() tuiState {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.st
+}
+
+// msgSnapshot copies the message line for race-safe test reads.
+func (a *tuiApp) msgSnapshot() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.msg
+}
+
+// setPaneForTest switches the focused pane in tests.
+func (a *tuiApp) setPaneForTest(p int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.st.pane = p
 }
 
 func tuiTr(key string, t map[string]string, fb string) string {
@@ -135,6 +157,12 @@ func newTuiApp() *tuiApp {
 // keymap table (global + pane-local entries). It never duplicates the action
 // bar. Each hint is one "key label" chip; overlong footers drop whole chips.
 func (a *tuiApp) footerText(width int) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.footerTextLocked(width)
+}
+
+func (a *tuiApp) footerTextLocked(width int) string {
 	if width <= 0 {
 		width = 80
 	}
@@ -187,12 +215,14 @@ func (a *tuiApp) helpBody() string {
 // it matches reality. Single close path for the modal done func (live
 // Esc/buttons) and the dump-harness Esc fallback — no stale showHelp.
 func (a *tuiApp) closeModalSync() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.pages.RemovePage("modal")
 	a.st.showHelp = false
 	a.st.confirm = 0
 	a.st.lastAct = tuiActNone
-	a.refresh()
-	a.applyFocus()
+	a.refreshLocked()
+	a.applyFocusLocked()
 }
 
 // showModal opens a centred modal over the stable root. The main page stays
@@ -223,8 +253,16 @@ func (a *tuiApp) showModal(title, body, hint string, buttons []string, onOK func
 }
 
 func (a *tuiApp) showHelp() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.showHelpLocked()
+}
+
+func (a *tuiApp) showHelpLocked() {
 	a.st.showHelp = true
 	a.showModal(tuiTr("TuiHelpTitle", a.t, "Keys"), a.helpBody(), "Esc "+tuiTr("TuiClose", a.t, "Close"), []string{tuiTr("TuiClose", a.t, "Close")}, nil, func() {
+		a.mu.Lock()
+		defer a.mu.Unlock()
 		a.st.showHelp = false
 	})
 }
@@ -233,22 +271,37 @@ func (a *tuiApp) confirmAction(act int) {
 	b, _ := tuiBindingByAct(act)
 	lbl := tuiTr(b.label, a.t, string(b.key))
 	a.showModal(tuiTr("TuiConfirmTitle", a.t, "Confirm"), lbl+"?", tuiTr("TuiConfirmHint", a.t, "Enter confirm · Esc cancel"), []string{tuiTr("TuiConfirmOK", a.t, "confirm"), tuiTr("TuiConfirmCancel", a.t, "cancel")}, func() {
-		a.setMsg(tuiDoAction(act, a.t))
+		msg := tuiDoAction(act, a.t)
+		a.setMsg(msg)
 	}, func() {
 		// Esc-cancel also lands here (done func i<0): leave nothing that
 		// a later Enter could re-fire. handleKeyEvent already zeroed
 		// st.confirm when it opened the dialog.
+		a.mu.Lock()
+		defer a.mu.Unlock()
 		a.st.confirm = 0
 		a.st.lastAct = tuiActNone
 	})
 }
 
 func (a *tuiApp) setMsg(s string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.setMsgLocked(s)
+}
+
+func (a *tuiApp) setMsgLocked(s string) {
 	a.msg = s
 	a.msgAt = time.Now()
 }
 
 func (a *tuiApp) refresh() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.refreshLocked()
+}
+
+func (a *tuiApp) refreshLocked() {
 	snap := takeTuiSnapshot()
 	// LOOP-SAFE: reads the worker-maintained probe cache only. The tick
 	// goroutine (tuiProbeWorkerTick) does the dialing; this never blocks.
@@ -324,12 +377,12 @@ func (a *tuiApp) refresh() {
 	if a.st.logOff <= 0 && a.follow {
 		a.logs.ScrollToEnd()
 	}
-	a.bar.SetText(a.barText(-1))
+	a.bar.SetText(a.barTextLocked())
 	fw := a.lastW
 	if fw <= 0 {
 		fw = 80
 	}
-	foot := a.footerText(fw - 2)
+	foot := a.footerTextLocked(fw - 2)
 	if a.msg != "" {
 		if time.Since(a.msgAt) < 8*time.Second {
 			foot = a.msg
@@ -370,11 +423,18 @@ func tuiDisplayState(snap tuiSnapshot, probe string, t map[string]string) (strin
 // two spaces, tview wraps only at spaces since Wrap(false) keeps words).
 // The selected chip is highlighted; focus on the bar is shown in its title.
 func (a *tuiApp) barText(width int) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.barTextLocked()
+}
+
+func (a *tuiApp) barTextLocked() string {
+	pane, sel := a.st.pane, a.st.sel
 	var sb strings.Builder
-	for i, b := range tuiKeymap {
+	for i, b := range tuiActionBindings() {
 		lbl := tuiTr(b.label, a.t, string(b.key))
 		c := fmt.Sprintf("[%c] %s", b.key, lbl)
-		if a.st.pane == tuiPaneActions && i == a.st.sel {
+		if pane == tuiPaneActions && i == sel {
 			if tuiNoColor() {
 				c = ">" + c + "<"
 			} else {
@@ -397,6 +457,8 @@ func (a *tuiApp) screenSize(screen tcell.Screen) (int, int) {
 			return w, h
 		}
 	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	if a.lastW > 0 && a.lastH > 0 {
 		return a.lastW, a.lastH
 	}
@@ -425,6 +487,8 @@ func (a *tuiApp) mainLayout(width int) *tview.Flex {
 // applyBodyClass switches stacked/two-column ONLY on class flips and keeps
 // selection + focus from app state (sel/pane live in a.st, never in Flex).
 func (a *tuiApp) applyBodyClass(width int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	wide := width >= 100
 	if a.body == nil {
 		a.body = tview.NewFlex()
@@ -443,11 +507,17 @@ func (a *tuiApp) applyBodyClass(width int) {
 			AddItem(a.status, 9, 0, false).
 			AddItem(a.logs, 0, 1, false)
 	}
-	a.applyFocus()
+	a.applyFocusLocked()
 }
 
 // applyFocus marks pane borders + titles from a.st without re-rooting.
 func (a *tuiApp) applyFocus() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.applyFocusLocked()
+}
+
+func (a *tuiApp) applyFocusLocked() {
 	if a.st.pane == tuiPaneActions {
 		a.status.SetBorderColor(tcell.ColorYellow)
 		a.logs.SetBorderColor(tcell.ColorWhite)
@@ -487,7 +557,9 @@ func runTuiApp() {
 	}
 	a.app.SetAfterDrawFunc(func(screen tcell.Screen) {
 		if w, h := screen.Size(); w > 0 && h > 0 {
+			a.mu.Lock()
 			a.lastW, a.lastH = w, h
+			a.mu.Unlock()
 			a.applyBodyClass(w)
 		}
 	})
@@ -563,18 +635,20 @@ func (a *tuiApp) modalInputHandler() func(*tcell.EventKey, func(tview.Primitive)
 // cleared so a later key or tick can never re-fire it.
 func (a *tuiApp) handleKeyEvent(ev *tcell.EventKey) *tcell.EventKey {
 	k := tuiEventKey(ev)
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.st = handleKey(a.st, k)
 	if a.st.quit {
 		return nil
 	}
 	if k.r == '?' {
 		if a.st.showHelp {
-			a.showHelp()
+			a.showHelpLocked()
 		} else {
 			a.pages.RemovePage("modal")
 		}
-		a.refresh()
-		a.applyFocus()
+		a.refreshLocked()
+		a.applyFocusLocked()
 		return nil
 	}
 	if a.st.confirm != 0 {
@@ -582,15 +656,15 @@ func (a *tuiApp) handleKeyEvent(ev *tcell.EventKey) *tcell.EventKey {
 		if a.st.lastAct == tuiActConfirmCancel {
 			a.st.confirm = 0
 			a.pages.RemovePage("modal")
-			a.refresh()
-			a.applyFocus()
+			a.refreshLocked()
+			a.applyFocusLocked()
 			a.st.lastAct = tuiActNone
 			return nil
 		}
 		a.confirmAction(act)
 		a.st.confirm = 0
-		a.refresh()
-		a.applyFocus()
+		a.refreshLocked()
+		a.applyFocusLocked()
 		a.st.lastAct = tuiActNone
 		return nil
 	}
@@ -598,15 +672,17 @@ func (a *tuiApp) handleKeyEvent(ev *tcell.EventKey) *tcell.EventKey {
 		a.st.lastAct != tuiActScrollUp && a.st.lastAct != tuiActScrollDown {
 		act := a.st.lastAct
 		a.st.lastAct = tuiActNone
-		a.setMsg(tuiDoAction(act, a.t))
+		a.mu.Unlock()
+		msg := tuiDoAction(act, a.t)
+		a.mu.Lock()
+		a.setMsgLocked(msg)
 	} else {
 		a.st.lastAct = tuiActNone
 	}
-	a.refresh()
-	a.applyFocus()
+	a.refreshLocked()
+	a.applyFocusLocked()
 	return nil
 }
-
 // tuiDebugOn reports whether console-mode debug logging is enabled.
 func tuiDebugOn() bool {
 	return os.Getenv("ORPANEL_TUI_DEBUG") == "1"

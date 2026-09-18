@@ -97,8 +97,8 @@ func TestSimSelectionMovesDown(t *testing.T) {
 	a := tuiTestApp()
 	simText(t, a, 80, 24)
 	simPress(a, "down", "down")
-	if a.st.sel != 2 {
-		t.Fatalf("sel=%d want 2", a.st.sel)
+	if a.stateSnapshot().sel != 2 {
+		t.Fatalf("sel=%d want 2", a.stateSnapshot().sel)
 	}
 	f := simText(t, a, 80, 24)
 	lbl := "r"
@@ -121,12 +121,14 @@ func TestSimTickKeepsSelection(t *testing.T) {
 	a := tuiTestApp()
 	simText(t, a, 80, 24)
 	simPress(a, "down", "down")
-	sel, pane := a.st.sel, a.st.pane
+	snap0 := a.stateSnapshot()
+	sel, pane := snap0.sel, snap0.pane
 	a.applyBodyClass(80)
 	a.refresh()
 	a.applyFocus()
-	if a.st.sel != sel || a.st.pane != pane {
-		t.Fatalf("tick moved sel=%d/%d pane=%d/%d", a.st.sel, sel, a.st.pane, pane)
+	snap1 := a.stateSnapshot()
+	if snap1.sel != sel || snap1.pane != pane {
+		t.Fatalf("tick moved sel=%d/%d pane=%d/%d", snap1.sel, sel, snap1.pane, pane)
 	}
 }
 
@@ -138,8 +140,8 @@ func TestSimTickThenDownContinues(t *testing.T) {
 	a.refresh()
 	a.applyFocus()
 	simPress(a, "down")
-	if a.st.sel != 3 {
-		t.Fatalf("sel=%d want 3 after down,down,tick,down", a.st.sel)
+	if a.stateSnapshot().sel != 3 {
+		t.Fatalf("sel=%d want 3 after down,down,tick,down", a.stateSnapshot().sel)
 	}
 }
 
@@ -150,8 +152,8 @@ func TestSimResizeKeepsSelection(t *testing.T) {
 	a.applyBodyClass(120)
 	a.applyBodyClass(120)
 	f := simText(t, a, 120, 30)
-	if a.st.sel != 2 {
-		t.Fatalf("sel=%d want 2 after 99->120", a.st.sel)
+	if a.stateSnapshot().sel != 2 {
+		t.Fatalf("sel=%d want 2 after 99->120", a.stateSnapshot().sel)
 	}
 	_ = f
 	_ = time.Now
@@ -317,7 +319,7 @@ func TestSimModalEnterClosesHelp(t *testing.T) {
 func TestSimModalEscCancelsConfirm(t *testing.T) {
 	a := tuiTestApp()
 	simText(t, a, 80, 24)
-	sel := a.st.sel
+	sel := a.stateSnapshot().sel
 	simPress(a, "down", "enter")
 	if front, _ := a.pages.GetFrontPage(); front != "modal" {
 		t.Fatalf("confirm modal not open")
@@ -326,11 +328,11 @@ func TestSimModalEscCancelsConfirm(t *testing.T) {
 	if front, _ := a.pages.GetFrontPage(); front == "modal" {
 		t.Fatalf("confirm modal still open after Esc")
 	}
-	if a.st.confirm != 0 {
+	if a.stateSnapshot().confirm != 0 {
 		t.Fatalf("confirm still pending")
 	}
-	if a.st.sel != sel+1 {
-		t.Fatalf("sel moved during modal: %d", a.st.sel)
+	if a.stateSnapshot().sel != sel+1 {
+		t.Fatalf("sel moved during modal: %d", a.stateSnapshot().sel)
 	}
 }
 
@@ -347,11 +349,11 @@ func TestSimModalEnterRunsActionOnce(t *testing.T) {
 	if front, _ := a.pages.GetFrontPage(); front == "modal" {
 		t.Fatalf("confirm modal still open after Enter")
 	}
-	if a.st.confirm != 0 {
+	if a.stateSnapshot().confirm != 0 {
 		t.Fatalf("confirm still pending after Enter")
 	}
-	if a.st.lastAct != tuiActNone {
-		t.Fatalf("lastAct not cleared after dispatch: %d", a.st.lastAct)
+	if a.stateSnapshot().lastAct != tuiActNone {
+		t.Fatalf("lastAct not cleared after dispatch: %d", a.stateSnapshot().lastAct)
 	}
 }
 
@@ -359,13 +361,13 @@ func TestSimModalSwallowsActionKeys(t *testing.T) {
 	a := tuiTestApp()
 	simText(t, a, 80, 24)
 	simPress(a, "?")
-	sel := a.st.sel
+	sel := a.stateSnapshot().sel
 	simPress(a, "s")
-	if a.st.sel != sel {
+	if a.stateSnapshot().sel != sel {
 		t.Fatalf("action key moved selection inside modal")
 	}
-	if a.msg != "" {
-		t.Fatalf("action fired inside modal: %q", a.msg)
+	if a.msgSnapshot() != "" {
+		t.Fatalf("action fired inside modal: %q", a.msgSnapshot())
 	}
 	simPress(a, "esc")
 }
@@ -375,7 +377,7 @@ func TestSimModalSwallowsQuit(t *testing.T) {
 	simText(t, a, 80, 24)
 	simPress(a, "?")
 	simPress(a, "q")
-	if a.st.quit {
+	if a.stateSnapshot().quit {
 		t.Fatalf("q inside modal quit the app")
 	}
 	simPress(a, "esc")
@@ -383,7 +385,7 @@ func TestSimModalSwallowsQuit(t *testing.T) {
 
 func TestSimFooterContextual(t *testing.T) {
 	a := tuiTestApp()
-	a.st.pane = tuiPaneActions
+	a.setPaneForTest(tuiPaneActions)
 	fa := a.footerText(78)
 	if strings.Contains(fa, "Start") && strings.Contains(fa, "Stop") {
 		t.Fatalf("footer duplicates action bar: %q", fa)
@@ -391,7 +393,7 @@ func TestSimFooterContextual(t *testing.T) {
 	if !strings.Contains(fa, "?") && !strings.Contains(fa, "help") {
 		t.Fatalf("footer missing help hint: %q", fa)
 	}
-	a.st.pane = tuiPaneLogs
+	a.setPaneForTest(tuiPaneLogs)
 	fl := a.footerText(78)
 	if !strings.Contains(fl, "scroll") && !strings.Contains(fl, "Scroll") {
 		t.Fatalf("log footer missing scroll hint: %q", fl)
@@ -469,9 +471,9 @@ func TestRealLoopRespondsAndStops(t *testing.T) {
 		t.Fatalf("deadlock: no response to injected key within 5s")
 	case <-time.After(800 * time.Millisecond):
 	}
-	if a.st.sel != 1 {
+	if a.stateSnapshot().sel != 1 {
 		a.app.Stop()
-		t.Fatalf("sel=%d want 1 after real-loop Down", a.st.sel)
+		t.Fatalf("sel=%d want 1 after real-loop Down", a.stateSnapshot().sel)
 	}
 	a.app.Stop()
 	select {
@@ -568,7 +570,7 @@ func TestHelpReopensAfterEscClose(t *testing.T) {
 	if front, _ := a.pages.GetFrontPage(); front == "modal" {
 		t.Fatalf("help still open after Esc")
 	}
-	if a.st.showHelp {
+	if a.stateSnapshot().showHelp {
 		t.Fatalf("showHelp stale after Esc close")
 	}
 	simPress(a, "?")
@@ -589,7 +591,7 @@ func TestHelpReopensAfterButtonClose(t *testing.T) {
 	if front, _ := a.pages.GetFrontPage(); front == "modal" {
 		t.Fatalf("help still open after button")
 	}
-	if a.st.showHelp {
+	if a.stateSnapshot().showHelp {
 		t.Fatalf("showHelp stale after button close")
 	}
 	simPress(a, "?")
@@ -613,14 +615,15 @@ func TestConfirmEscLeavesNothingToRefire(t *testing.T) {
 	if front, _ := a.pages.GetFrontPage(); front == "modal" {
 		t.Fatalf("confirm still open after Esc")
 	}
-	if a.st.confirm != 0 || a.st.lastAct != tuiActNone {
-		t.Fatalf("stale confirm=%d lastAct=%d after Esc", a.st.confirm, a.st.lastAct)
+	snapE := a.stateSnapshot()
+	if snapE.confirm != 0 || snapE.lastAct != tuiActNone {
+		t.Fatalf("stale confirm=%d lastAct=%d after Esc", snapE.confirm, snapE.lastAct)
 	}
 	// A later Enter must not re-fire the cancelled action.
-	msgBefore := a.msg
+	msgBefore := a.msgSnapshot()
 	a.handleKeyEvent(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
-	if a.msg != msgBefore {
-		t.Fatalf("cancelled confirm re-fired on Enter: %q", a.msg)
+	if a.msgSnapshot() != msgBefore {
+		t.Fatalf("cancelled confirm re-fired on Enter: %q", a.msgSnapshot())
 	}
 }
 
@@ -648,7 +651,7 @@ func TestKeyHandlingNonBlockingDuringSlowProbe(t *testing.T) {
 	if el > 1500*time.Millisecond {
 		t.Fatalf("key handling blocked %.1fs waiting for probe", el.Seconds())
 	}
-	if a.st.sel != 1 {
-		t.Fatalf("sel=%d want 1", a.st.sel)
+	if a.stateSnapshot().sel != 1 {
+		t.Fatalf("sel=%d want 1", a.stateSnapshot().sel)
 	}
 }
