@@ -2,22 +2,20 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"os"
-	"os/signal"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 )
 
 // tui.go: terminal setup, main loop, actions, plain fallback.
 // Rendering primitives and key handling live in tui_keys.go.
-
-// tuiTerminalSize returns the real console size, degraded safely.
-func tuiTerminalSize() (int, int) {
-	if w, h, err := tuiConsoleSize(); err == nil && w >= 40 && h >= 10 {
-		return w, h
-	}
-	return 80, 24
-}
 
 func takeTuiSnapshot() tuiSnapshot {
 	cfg := loadConfig()
@@ -37,13 +35,17 @@ func takeTuiSnapshot() tuiSnapshot {
 	if isOmniOpRunning() && opPhase == "" {
 		opPhase = "op"
 	}
+	// On-demand probe (cached ~2s by the live loop): the tray watchdog is
+	// absent in TUI mode, so an empty probe state must not render as truth.
+	probe, probeLabel := tuiLiveProbe(h.ProbeStatus, loadTranslations(cfg.Language))
 	return tuiSnapshot{
 		appVer:   AppVersion,
 		omniVer:  h.Version,
 		lang:     cfg.Language,
 		theme:    cfg.Theme,
-		status:   h.Status,
-		probe:    h.ProbeStatus,
+		status:   tuiStatusLabel(h.Status, loadTranslations(cfg.Language)),
+		probe:    probe,
+		probeLabel: probeLabel,
 		port:     fmt.Sprintf("%d", OmniPort),
 		nodeVer:  h.NodeVersion,
 		external: h.ExternallyManaged,
@@ -52,115 +54,431 @@ func takeTuiSnapshot() tuiSnapshot {
 	}
 }
 
-// runTUI runs the full-screen interface. It restores the terminal on every
-// exit path. If stdout is not a terminal it prints the plain summary instead.
+// Probe state lives in worker-maintained caches. The tick goroutine dials;
+// the event loop only reads. probeOmniHealth blocks up to its timeout when
+// OmniRoute is booting/hung, so calling it on the loop would hitch every
+// keypress precisely when the owner is watching.
+var (
+	tuiProbeCacheMu sync.Mutex
+	tuiProbeCache   string
+	tuiProbeCacheAt time.Time
+)
+
+// tuiRefreshProbeCache dials OmniRoute and stores the outcome. WORKER ONLY:
+// call from the tick goroutine (or the dump harness), never on the loop.
+func tuiRefreshProbeCache(timeout time.Duration) {
+	res := probeOmniHealth(timeout)
+	tuiProbeCacheMu.Lock()
+	defer tuiProbeCacheMu.Unlock()
+	switch res.outcome {
+	case probeHealthy:
+		tuiProbeCache = "healthy"
+	case probeDegraded:
+		tuiProbeCache = "degraded"
+	default:
+		tuiProbeCache = "unreachable"
+	}
+	tuiProbeCacheAt = time.Now()
+}
+
+// tuiCachedProbe reads the worker cache. LOOP-SAFE: never dials. Empty
+// cache reads as "unknown" (checking), never as down.
+func tuiCachedProbe() string {
+	tuiProbeCacheMu.Lock()
+	defer tuiProbeCacheMu.Unlock()
+	if tuiProbeCache == "" {
+		return "unknown"
+	}
+	return tuiProbeCache
+}
+
+// tuiLiveProbe returns the cached probe + label. LOOP-SAFE: read-only.
+// Labels are localized; unknown stays "checking", never an enum.
+func tuiLiveProbe(current string, t map[string]string) (string, string) {
+	p := tuiCachedProbe()
+	if current == "unknown" && p == "unreachable" {
+		p = "unknown"
+	}
+	return p, tuiProbeLabel(p, t)
+}
+
+// tuiProbeWorkerTick is the SINGLE place network probes start. Runs on the
+// tick goroutine: refreshes stale caches (~2s omni, ~3s panel, warms the
+// hourly npm version lookup), then the caller queues the read-only draw.
+func tuiProbeWorkerTick() {
+	tuiProbeCacheMu.Lock()
+	stale := tuiProbeCache == "" || time.Since(tuiProbeCacheAt) > 2*time.Second
+	tuiProbeCacheMu.Unlock()
+	if stale {
+		tuiRefreshProbeCache(1500 * time.Millisecond)
+	}
+	tuiPanelMu.Lock()
+	pstale := tuiPanelMiss.IsZero() || time.Since(tuiPanelMiss) > 3*time.Second
+	tuiPanelMu.Unlock()
+	if pstale {
+		tuiRefreshPanelCache()
+	}
+	getOmniLatestVersion()
+}
+
+// runTUI runs the full-screen interface (tview/tcell own all input).
+// Terminal restore is handled by tcell on every exit path. If stdout is
+// not a terminal it prints the plain summary instead.
 func runTUI() {
-	if !isTerminalOut() {
-		printPlainSummary()
+	if script := tuiScriptKeys(); script != nil {
+		runTuiScript(script)
 		return
 	}
-	t := loadTranslations(getCurrentLang())
-	restore, err := tuiEnter()
+	runTuiApp()
+}
+
+// tuiScriptKeys reads ORPANEL_TUI_SCRIPT: comma-separated key names
+// (down,up,enter,q,?,tab, letters) or a file path with one name per line.
+// Test seam only, not a user feature.
+func tuiScriptKeys() []string {
+	raw := os.Getenv("ORPANEL_TUI_SCRIPT")
+	if raw == "" {
+		return nil
+	}
+	if data, err := os.ReadFile(raw); err == nil {
+		raw = string(data)
+	}
+	parts := strings.Split(raw, ",")
+	var out []string
+	for _, p := range parts {
+		for _, line := range strings.Split(p, "\n") {
+			if s := strings.TrimSpace(line); s != "" {
+				out = append(out, strings.ToLower(s))
+			}
+		}
+	}
+	return out
+}
+
+// tuiSimKey maps a script name to a tcell key event for the sim harness.
+// It flows through the real SetInputCapture closure, not around it.
+func tuiSimKey(name string) (tcell.Key, rune) {
+	switch name {
+	case "down", "j":
+		return tcell.KeyDown, 0
+	case "up", "k":
+		return tcell.KeyUp, 0
+	case "left", "h":
+		return tcell.KeyLeft, 0
+	case "right", "l":
+		return tcell.KeyRight, 0
+	case "enter":
+		return tcell.KeyEnter, 0
+	case "tab":
+		return tcell.KeyTab, 0
+	case "esc", "escape":
+		return tcell.KeyEscape, 0
+	case "pgup", "pageup":
+		return tcell.KeyPgUp, 0
+	case "pgdn", "pagedown":
+		return tcell.KeyPgDn, 0
+	case "home":
+		return tcell.KeyHome, 0
+	case "end":
+		return tcell.KeyEnd, 0
+	case "q", "quit":
+		return tcell.KeyRune, 'q'
+	case "?":
+		return tcell.KeyRune, '?'
+	default:
+		if len([]rune(name)) == 1 {
+			for _, r := range name {
+				return tcell.KeyRune, r
+			}
+		}
+		return tcell.KeyRune, 0
+	}
+}
+
+// tuiSeedLogs fills the in-process log buffer with representative lines so
+// scripted frames demonstrate a full log pane. Test seam only.
+func tuiSeedLogs() {
+	logMutex.Lock()
+	defer logMutex.Unlock()
+	logBuffer = nil
+	now := time.Now().Format("2006-01-02 15:04:05")
+	seeds := [][2]string{
+		{"INFO", "panel starting on :20127"},
+		{"INFO", "watchdog tick: probing omni health"},
+		{"WARN", "port 20128 busy, retrying in 2s"},
+		{"INFO", "omniroute answered health probe (200)"},
+		{"ERROR", "npm view failed, using cached version"},
+		{"INFO", "config saved (lang=tr theme=system)"},
+		{"WARN", "node 24.20.0 below recommended 22+, continuing"},
+		{"INFO", "autostart state synced with tray"},
+		{"INFO", "themes loaded (dark/light)"},
+		{"ERROR", "update check timed out, will retry"},
+		{"INFO", "log retention sweep removed 0 entries"},
+		{"WARN", "recovery backoff active (3 attempts)"},
+		{"INFO", "tray tooltip refreshed"},
+		{"INFO", "locale tr applied to 42 keys"},
+	}
+	for i, s2 := range seeds {
+		logBuffer = append(logBuffer, "["+now+"] "+s2[0]+": seed line "+s2[1]+
+			" #"+string(rune('a'+i)))
+	}
+}
+
+// simFrame renders the app root at w,h on a simulation screen and reads the
+// cell grid back to text. Size comes from the sim screen, never the console.
+// It draws the root primitive directly: app.Draw/app.SetScreen queue on the
+// event loop, which does not run in the harness — SetScreen a second time
+// blocks forever on screenReplacement, so it must never be called here.
+func simFrame(a *tuiApp, sim tcell.SimulationScreen, w, h int) string {
+	sim.Init()
+	sim.SetSize(w, h)
+	sim.Clear()
+	a.applyBodyClass(w)
+	a.refresh()
+	a.applyFocus()
+	a.pages.SetRect(0, 0, w, h)
+	a.pages.Draw(sim)
+	sim.Show()
+	cells, cw, ch := sim.GetContents()
+	var b strings.Builder
+	for y := 0; y < ch; y++ {
+		var row []rune
+		for x := 0; x < cw; x++ {
+			c := cells[y*cw+x]
+			if len(c.Runes) == 0 {
+				row = append(row, ' ')
+			} else {
+				row = append(row, c.Runes[0])
+			}
+		}
+		b.WriteString(strings.TrimRight(string(row), " ") + "\n")
+	}
+	out := strings.TrimRight(b.String(), "\n")
+	return out
+}
+
+// simInject feeds one scripted key through the REAL input path: the event is
+// dispatched via the shared handleKeyEvent used by the live SetInputCapture
+// closure (identical code path, no mode flag). Modal-open keys go through
+// the same modal gate the live loop uses.
+func simInject(a *tuiApp, sim tcell.SimulationScreen, name string) {
+	key, r := tuiSimKey(name)
+	if r == 0 && key == tcell.KeyRune {
+		return
+	}
+	ev := tcell.NewEventKey(key, r, tcell.ModNone)
+	if front, _ := a.pages.GetFrontPage(); front == "modal" {
+		// Same gate as the live loop: modal keys reach the modal's own
+		// input handler (Esc fires its cancel func); anything else is
+		// swallowed so no global shortcut fires behind the dialog.
+		switch ev.Key() {
+		case tcell.KeyEnter, tcell.KeyTab, tcell.KeyBacktab:
+			if h := a.modalInputHandler(); h != nil {
+				h(ev, func(p tview.Primitive) { a.app.SetFocus(p) })
+			}
+			return
+		case tcell.KeyEscape:
+			if h := a.modalInputHandler(); h != nil {
+				h(ev, func(p tview.Primitive) { a.app.SetFocus(p) })
+			}
+			// Belt-and-braces: the modal cancel func closes the page, but
+			// if focus never entered the modal the handler above is a
+			// no-op — fall through to the shared close path so dumps and
+			// tests always converge with the live loop.
+			if front2, _ := a.pages.GetFrontPage(); front2 == "modal" {
+				a.closeModalSync()
+			}
+			return
+		default:
+			return
+		}
+	}
+	a.handleKeyEvent(ev)
+	_ = sim
+}
+
+// runTuiScript renders the REAL tview app on a tcell simulation screen and
+// prints each frame. ORPANEL_TUI_SIZE=WxH overrides the dump size;
+// ORPANEL_TUI_SCRIPT_SEED=1 fills the log pane with representative lines.
+// Frames come from the same renderer the owner runs (tview + sim screen).
+func runTuiScript(names []string) {
+	if os.Getenv("ORPANEL_TUI_SCRIPT_SEED") != "" {
+		tuiSeedLogs()
+	}
+	w, h := 80, 24
+	if v := os.Getenv("ORPANEL_TUI_SIZE"); v != "" {
+		var ww, hh int
+		if _, err := fmt.Sscanf(v, "%dx%d", &ww, &hh); err == nil && ww > 0 && hh > 0 {
+			w, h = ww, hh
+		}
+	}
+	a := newTuiApp()
+	// Harness runs on its own goroutine (not the event loop), so warming
+	// the worker caches here is safe and gives dumps real probe values.
+	tuiProbeWorkerTick()
+	sim := tcell.NewSimulationScreen("UTF-8")
+	fmt.Print(simFrame(a, sim, w, h) + "\n---FRAME---\n")
+	for _, n := range names {
+		if n == "tick" {
+			w2 := w
+			if v := os.Getenv("ORPANEL_TUI_SIZE"); v != "" {
+				var ww, hh int
+				if _, err := fmt.Sscanf(v, "%dx%d", &ww, &hh); err == nil && ww > 0 {
+					w2 = ww
+				}
+			}
+			// Worker tick first (dial on this harness goroutine, never the
+			// loop), then the read-only refresh inside simFrame.
+			tuiProbeWorkerTick()
+			a.applyBodyClass(w2)
+			a.refresh()
+			a.applyFocus()
+			fmt.Print(simFrame(a, sim, w, h) + "\n---FRAME---\n")
+			continue
+		}
+		simInject(a, sim, n)
+		fmt.Print(simFrame(a, sim, w, h) + "\n---FRAME---\n")
+		if n == "q" || a.st.quit {
+			break
+		}
+	}
+}
+
+// tuiKeyReader is retired: tcell decodes all console input (see tuiEventKey).
+// Kept as documentation of the old byte protocol, not called.
+
+// tuiPanelBase is overrideable in tests (httptest server URL).
+var tuiPanelBase = ""
+
+func tuiPanelURL() string {
+	if tuiPanelBase != "" {
+		return tuiPanelBase
+	}
+	return "http://127.0.0.1:" + strconv.Itoa(PanelPort)
+}
+
+var (
+	tuiPanelMu   sync.Mutex
+	tuiPanelHit  bool
+	tuiPanelMiss time.Time
+)
+
+// tuiDecideMode is pure: panel reachable => client mode, else direct.
+func tuiDecideMode(panelAnswers bool) string {
+	if panelAnswers {
+		return "client"
+	}
+	return "direct"
+}
+
+// tuiRefreshPanelCache dials 127.0.0.1:20127 and stores the answer. WORKER
+// ONLY: call from the tick goroutine (or the dump harness), never on the
+// event loop (dial latency would hitch keys during the boot window).
+func tuiRefreshPanelCache() bool {
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	resp, err := client.Get(tuiPanelURL() + "/api/status")
+	ok := err == nil && resp != nil && resp.StatusCode < 500
+	if resp != nil && resp.Body != nil {
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+	}
+	tuiPanelMu.Lock()
+	defer tuiPanelMu.Unlock()
+	tuiPanelMiss = time.Now()
+	tuiPanelHit = ok
+	return ok
+}
+
+// tuiCachedPanelServing reads the worker cache. LOOP-SAFE: never dials.
+func tuiCachedPanelServing() bool {
+	tuiPanelMu.Lock()
+	defer tuiPanelMu.Unlock()
+	if tuiPanelMiss.IsZero() {
+		return false
+	}
+	if time.Since(tuiPanelMiss) > 3*time.Second {
+		return tuiPanelHit
+	}
+	return tuiPanelHit
+}
+
+// tuiPanelServing is the worker/dump entry: refresh then read. Tests and the
+// dump harness call it; the event loop must use tuiCachedPanelServing only.
+func tuiPanelServing() bool {
+	return tuiRefreshPanelCache()
+}
+
+// tuiPanelEndpoint maps mutating actions to panel API paths. Every action
+// with a non-empty endpoint goes through the panel when one is serving.
+// /api/omni/reinstall exists on the panel but no TUI action exposes it.
+func tuiPanelEndpoint(act int) string {
+	switch act {
+	case tuiActStart:
+		return "/api/start"
+	case tuiActStop:
+		return "/api/stop"
+	case tuiActRestart:
+		return "/api/restart"
+	case tuiActUpdate:
+		return "/api/omni/update"
+	case tuiActRepair:
+		return "/api/omni/repair"
+	case tuiActInstall:
+		return "/api/omni/install"
+	default:
+		return ""
+	}
+}
+
+// tuiShouldUseClient is pure: client iff the action has a panel endpoint
+// AND a panel answers. tuiDoAction consults it; tests assert it per action.
+func tuiShouldUseClient(act int, panelAnswers bool) bool {
+	return panelAnswers && tuiPanelEndpoint(act) != ""
+}
+
+// tuiPanelClient POSTs the action to the serving panel and surfaces failures
+// on the message line. Async: the panel runs the op in the background.
+func tuiPanelClient(act int, t map[string]string) string {
+	tr := func(k, fb string) string {
+		if v, ok := t[k]; ok && v != "" {
+			return v
+		}
+		return fb
+	}
+	ep := tuiPanelEndpoint(act)
+	if ep == "" {
+		return ""
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	req, err := http.NewRequest(http.MethodPost, tuiPanelURL()+ep, nil)
 	if err != nil {
-		printPlainSummary()
-		return
+		return tr("TuiOpFailed", "failed") + ": " + err.Error()
 	}
-	var restored bool
-	restoreOnce := func() {
-		if !restored {
-			restored = true
-			restore()
-		}
+	resp, err := client.Do(req)
+	if err != nil {
+		return tr("TuiOpFailed", "failed") + ": " + err.Error()
 	}
-	defer restoreOnce()
-	defer func() {
-		if r := recover(); r != nil {
-			restoreOnce()
-			panic(r)
-		}
-	}()
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt)
-	defer signal.Stop(sig)
-	go func() {
-		<-sig
-		restoreOnce()
-		os.Exit(130)
-	}()
-	st := tuiState{pane: tuiPaneActions, rows: tuiActionRows(t)}
-	msg := ""
-	keys := tuiKeyReader()
-	tick := time.NewTicker(500 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		snap := takeTuiSnapshot()
-		snap.msg = msg
-		w, h := tuiTerminalSize()
-		fmt.Print("\x1b[H" + composeFrame(st, snap, t, w, h, time.Now()))
-		select {
-		case k, ok := <-keys:
-			if !ok {
-				return
-			}
-			st = handleKey(st, k)
-			if st.quit {
-				return
-			}
-			msg = tuiDoAction(st.lastAct, t)
-			st.rows = tuiActionRows(loadTranslations(getCurrentLang()))
-		case <-tick.C:
-		}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode >= 400 {
+		return tr("TuiOpFailed", "failed") + ": HTTP " + strconv.Itoa(resp.StatusCode)
 	}
+	return tr("TuiOpStarted", "Started")
 }
 
-// tuiKeyReader decodes stdin bytes into tuiKey values. Arrows arrive as
-// ESC [ A / ESC [ B. The goroutine exits when stdin closes.
-func tuiKeyReader() <-chan tuiKey {
-	ch := make(chan tuiKey, 16)
-	go func() {
-		defer close(ch)
-		var one [1]byte
-		for {
-			n, err := os.Stdin.Read(one[:])
-			if err != nil || n == 0 {
-				return
-			}
-			c := one[0]
-			if c == 0x1b {
-				var seq [2]byte
-				m, err := os.Stdin.Read(seq[:1])
-				if err != nil || m == 0 || seq[0] != '[' {
-					continue
-				}
-				m, err = os.Stdin.Read(seq[1:2])
-				if err != nil || m == 0 {
-					continue
-				}
-				ch <- tuiKey{esc: true, raw: "[" + string(seq[1])}
-				continue
-			}
-			switch c {
-			case '\t':
-				ch <- tuiKey{r: '\t'}
-			case '\r', '\n':
-				ch <- tuiKey{r: '\r'}
-			case 0x03:
-				ch <- tuiKey{raw: "\x03"}
-			default:
-				ch <- tuiKey{r: rune(c)}
-			}
-		}
-	}()
-	return ch
-}
-
-// tuiDoAction executes one action id. Long ops run guarded by existing mutexes.
+// tuiDoAction dispatches one action id. Mutating actions (every action with
+// a panel endpoint) go through the serving panel when one answers, so the
+// tray watchdog never races a local stop/start and two processes never run
+// concurrent global npm ops (the op mutex is per-process).
 func tuiDoAction(act int, t map[string]string) string {
 	tr := func(k, fb string) string {
 		if v, ok := t[k]; ok && v != "" {
 			return v
 		}
 		return fb
+	}
+	if tuiShouldUseClient(act, tuiCachedPanelServing()) {
+		return tuiPanelClient(act, t)
 	}
 	switch act {
 	case tuiActStart:

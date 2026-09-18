@@ -2,21 +2,20 @@
 
 package main
 
-// tuiEnter is a no-op on unix here: ANSI works without setup, and the loop
-// hides/shows the cursor with escape codes balanced on every exit path.
+// tcell owns all unix console input; no raw-mode code of ours remains.
+// tuiEnter is kept for the debug log contract: with ORPANEL_TUI_DEBUG=1 it
+// logs enter/leave lines, otherwise it is a no-op returning a no-op restore.
 func tuiEnter() (func(), error) {
-	print("\x1b[?25l")
-	restored := false
+	if tuiDebugOn() {
+		tuiDebugLog("TUI console enter: tcell owns input (unix)")
+	}
 	return func() {
-		if restored {
-			return
+		if tuiDebugOn() {
+			tuiDebugLog("TUI console leave: tcell restored (unix)")
 		}
-		restored = true
-		print("\x1b[?25h")
 	}, nil
 }
+// tuiCodePageSwitch is a no-op on unix (UTF-8 assumed).
+func tuiCodePageSwitch() func() { return func() {} }
 
-// tuiConsoleSize degrades on unix: TERM columns/rows via env, else 80x24.
-func tuiConsoleSize() (int, int, error) {
-	return 80, 24, nil
-}
+// tuiConsoleSize is used for pre-layout math; tview recomputes per draw.

@@ -1359,7 +1359,12 @@ func main() {
 		}
 	}
 
-	// No flags: full-screen TUI on a terminal, plain summary when headless.
+	// No flags: scripted frames (test seam), full-screen TUI on a terminal,
+	// plain summary when headless.
+	if script := tuiScriptKeys(); script != nil {
+		runTuiScript(script)
+		return
+	}
 	if !isTerminal() || !isTerminalOut() {
 		printPlainSummary()
 		return

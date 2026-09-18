@@ -241,6 +241,7 @@ func checkOmniHealth() OmniHealth {
 		NodeVersion:     nodeVer,
 		NodeOk:          nodeOk,
 		Status:          status,
+		PortFree:        portFree,
 		Health:          health,
 		Message:         msg,
 	}

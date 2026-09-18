@@ -102,6 +102,9 @@ go build -ldflags "-X main.AppVersion=dev" -o orPanel.exe  # Windows
 
 Requires Go 1.23+.
 
+Runtime artifact stays a single binary. TUI modules: `github.com/rivo/tview v0.42.0`
+(`github.com/gdamore/tcell/v2 v2.8.1` indirect) for the full-screen console UI.
+
 ## Architecture
 
 ```

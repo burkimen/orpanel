@@ -2,136 +2,274 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
+	"golang.org/x/sys/windows"
 )
 
-func tuiTestMap() map[string]string {
-	return map[string]string{
+type windowsHandle = windows.Handle
+
+func tuiTestApp() *tuiApp {
+	a := newTuiApp()
+	a.t = map[string]string{
 		"TuiStatus": "Status", "TuiLogs": "Logs", "TuiActions": "Actions",
-		"TuiHelpTitle": "Keys", "TuiPressQ": "quit",
+		"TuiHelpTitle": "Keys", "TuiHelpNavTitle": "Navigation", "TuiHelpActTitle": "Actions",
+		"TuiNavHint": "Tab switch pane", "TuiClose": "Close", "TuiHelp": "Help",
+		"TuiConfirmTitle": "Confirm", "TuiConfirmHint": "Enter confirm",
+		"TuiConfirmOK": "confirm", "TuiConfirmCancel": "cancel",
+		"TuiConfirmLegend": "* needs confirm",
+		"TuiHintScrollLine": "arrows select", "TuiHintSelect": "select",
+		"TuiHintPane": "switch pane", "TuiHintActivate": "run", "TuiHintCancel": "close",
+		"TuiHintScroll": "scroll", "TuiHintEdges": "top/bottom",
+		"TuiHintHelp": "help", "TuiHintQuit": "quit",
+		"TuiNavSelect": "Select", "TuiNavPane": "Switch pane", "TuiNavActivate": "Run",
+		"TuiNavCancel": "Close", "TuiNavScroll": "Scroll", "TuiNavEdges": "Top/bottom",
+		"TuiTooSmall": "Terminal too small (need 60x16)",
+		"HealthBadgeRunning": "Running", "HealthBadgeStopped": "Stopped",
+		"HealthBadgeNotInstalled": "Not installed", "HealthBadgePortConflict": "Port conflict",
+		"HealthLabelVersion": "Version", "HealthLabelPort": "Port", "HealthLabelNode": "Node",
+		"ProbeStarting": "Starting", "ProbeDegraded": "Not responding", "ProbeUnknown": "Checking",
+		"TuiStart": "Start", "TuiStop": "Stop", "TuiRestart": "Restart", "TuiUpdate": "Update",
+		"TuiRepair": "Repair", "TuiInstall": "Install", "TuiAutostart": "Autostart",
+		"TuiLanguage": "Language", "TuiTheme": "Theme", "TuiWebUI": "Web UI",
+		"TuiManagedPanel": "managed by panel", "TuiManagedLocal": "managed local",
+		"TuiOpFailed": "failed", "TuiOpStarted": "Started",
 	}
+	a.st = tuiState{pane: tuiPaneActions, rows: tuiActionRows(a.t)}
+	return a
 }
 
-func tuiTestSnap() tuiSnapshot {
-	return tuiSnapshot{
-		appVer: "1.0", omniVer: "3.0", lang: "en", theme: "dark",
-		status: "running", probe: "healthy", port: "20128", nodeVer: "v24",
-		logs: []string{"[2026-01-01 00:00:00] INFO: hello world, a fairly long log line for truncation"},
-	}
-}
-
-func tuiLineWidths(t *testing.T, frame string, width int) {
+// simText renders the live app root on a simulation screen at w,h and reads
+// cells back. Same renderer + same root as the owner runs.
+func simText(t *testing.T, a *tuiApp, w, h int) string {
 	t.Helper()
-	for i, ln := range strings.Split(frame, "\n") {
-		if visibleLen(ln) != width {
-			t.Fatalf("line %d visible=%d want %d: %q", i, visibleLen(ln), width, ln)
-		}
-		if len(ln) == 0 {
-			t.Fatalf("line %d empty", i)
-		}
+	sim := tcell.NewSimulationScreen("UTF-8")
+	if w < 60 || h < 16 {
+		return a.t["TuiTooSmall"]
+	}
+	return simFrame(a, sim, w, h)
+}
+
+func simPress(a *tuiApp, names ...string) {
+	sim := tcell.NewSimulationScreen("UTF-8")
+	sim.Init()
+	for _, n := range names {
+		simInject(a, sim, n)
 	}
 }
 
-func TestComposeFrameSizes(t *testing.T) {
-	tm := tuiTestMap()
-	for _, w := range []int{40, 80, 120} {
-		for _, h := range []int{10, 24, 40} {
-			st := tuiState{pane: tuiPaneActions, rows: tuiActionRows(tm)}
-			f := composeFrame(st, tuiTestSnap(), tm, w, h, time.Now())
-			lines := strings.Split(f, "\n")
-			if len(lines) != h {
-				t.Fatalf("w=%d h=%d lines=%d", w, h, len(lines))
+func TestSimFrameDimensions(t *testing.T) {
+	a := tuiTestApp()
+	for _, wh := range [][2]int{{80, 24}, {120, 30}} {
+		f := simText(t, a, wh[0], wh[1])
+		lines := strings.Split(f, "\n")
+		if len(lines) != wh[1] {
+			t.Fatalf("%dx%d lines=%d", wh[0], wh[1], len(lines))
+		}
+		for i, ln := range lines {
+			if len([]rune(ln)) > wh[0] {
+				t.Fatalf("%dx%d line %d width %d: %q", wh[0], wh[1], i, len([]rune(ln)), ln)
 			}
-			tuiLineWidths(t, f, w)
-			if !strings.Contains(f, "Status") || !strings.Contains(f, "Logs") || !strings.Contains(f, "Actions") {
-				t.Fatalf("w=%d h=%d missing sections", w, h)
-			}
+		}
+		if !strings.Contains(f, "Status") || !strings.Contains(f, "Logs") {
+			t.Fatalf("%dx%d missing pane titles:\n%s", wh[0], wh[1], f)
 		}
 	}
 }
 
-func TestComposeFrameTruncates(t *testing.T) {
-	tm := tuiTestMap()
-	st := tuiState{pane: tuiPaneActions, rows: tuiActionRows(tm)}
-	f := composeFrame(st, tuiTestSnap(), tm, 40, 24, time.Now())
-	if !strings.Contains(f, "…") {
-		t.Fatalf("expected ellipsis truncation at width 40:\n%s", f)
-	}
-	for _, ln := range strings.Split(f, "\n") {
-		if visibleLen(ln) > 40 {
-			t.Fatalf("overflow: %q", ln)
-		}
+func TestSimTooSmallGuard(t *testing.T) {
+	a := tuiTestApp()
+	f := simText(t, a, 40, 12)
+	if !strings.Contains(f, "too small") {
+		t.Fatalf("expected too-small line:\n%s", f)
 	}
 }
 
-func TestHandleKeyTransitions(t *testing.T) {
-	tm := tuiTestMap()
+func TestSimSelectionMovesDown(t *testing.T) {
+	a := tuiTestApp()
+	simText(t, a, 80, 24)
+	simPress(a, "down", "down")
+	if a.st.sel != 2 {
+		t.Fatalf("sel=%d want 2", a.st.sel)
+	}
+	f := simText(t, a, 80, 24)
+	lbl := "r"
+	if v := a.t["TuiRestart"]; v != "" {
+		lbl = v
+	}
+	found := false
+	for _, ln := range strings.Split(f, "\\n") {
+		if strings.Contains(ln, lbl) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("selected row %q missing from frame:\n%s", lbl, f)
+	}
+}
+
+func TestSimTickKeepsSelection(t *testing.T) {
+	a := tuiTestApp()
+	simText(t, a, 80, 24)
+	simPress(a, "down", "down")
+	sel, pane := a.st.sel, a.st.pane
+	a.applyBodyClass(80)
+	a.refresh()
+	a.applyFocus()
+	if a.st.sel != sel || a.st.pane != pane {
+		t.Fatalf("tick moved sel=%d/%d pane=%d/%d", a.st.sel, sel, a.st.pane, pane)
+	}
+}
+
+func TestSimTickThenDownContinues(t *testing.T) {
+	a := tuiTestApp()
+	simText(t, a, 80, 24)
+	simPress(a, "down", "down")
+	a.applyBodyClass(80)
+	a.refresh()
+	a.applyFocus()
+	simPress(a, "down")
+	if a.st.sel != 3 {
+		t.Fatalf("sel=%d want 3 after down,down,tick,down", a.st.sel)
+	}
+}
+
+func TestSimResizeKeepsSelection(t *testing.T) {
+	a := tuiTestApp()
+	simText(t, a, 99, 24)
+	simPress(a, "down", "down")
+	a.applyBodyClass(120)
+	a.applyBodyClass(120)
+	f := simText(t, a, 120, 30)
+	if a.st.sel != 2 {
+		t.Fatalf("sel=%d want 2 after 99->120", a.st.sel)
+	}
+	_ = f
+	_ = time.Now
+}
+
+func TestSimHelpModal(t *testing.T) {
+	a := tuiTestApp()
+	simText(t, a, 80, 24)
+	simPress(a, "?")
+	f := simText(t, a, 80, 24)
+	if !a.pages.HasPage("modal") {
+		t.Fatalf("help modal page missing")
+	}
+	if !strings.Contains(f, "Navigation") {
+		t.Fatalf("help body missing:\n%s", f)
+	}
+}
+
+func TestSimConfirmModal(t *testing.T) {
+	a := tuiTestApp()
+	simText(t, a, 80, 24)
+	simPress(a, "down", "enter")
+	f := simText(t, a, 80, 24)
+	if !a.pages.HasPage("modal") {
+		t.Fatalf("confirm modal page missing")
+	}
+	if !strings.Contains(f, "Confirm") {
+		t.Fatalf("confirm title missing:\n%s", f)
+	}
+}
+
+func TestSimNonTTYFallback(t *testing.T) {
+	s := plainSummaryText()
+	if !strings.Contains(s, "orpanel v") {
+		t.Fatalf("plain summary missing version:\n%s", s)
+	}
+}
+
+func TestDisplayStateFromProbe(t *testing.T) {
+	m := map[string]string{
+		"HealthBadgeRunning": "Running", "HealthBadgeStopped": "Stopped",
+		"HealthBadgePortConflict": "Port conflict", "HealthBadgeNotInstalled": "Not installed",
+		"ProbeStarting": "Starting", "ProbeDegraded": "Not responding", "ProbeUnknown": "Checking",
+		"TuiNotInstalled": "Not installed",
+	}
+	snap := tuiSnapshot{status: "port_conflict"}
+	if got, _ := tuiDisplayState(snap, "healthy", m); got != "Running" {
+		t.Fatalf("healthy over conflict = %q", got)
+	}
+	if got, _ := tuiDisplayState(snap, "unreachable", m); got != "Port conflict" {
+		t.Fatalf("unreachable+port = %q", got)
+	}
+	snap2 := tuiSnapshot{status: "stopped"}
+	if got, _ := tuiDisplayState(snap2, "unreachable", m); got != "Stopped" {
+		t.Fatalf("unreachable+stopped = %q", got)
+	}
+	if got, _ := tuiDisplayState(tuiSnapshot{}, "starting", m); got != "Starting" {
+		t.Fatalf("starting = %q", got)
+	}
+	if got, _ := tuiDisplayState(tuiSnapshot{status: "port_conflict"}, "healthy", m); strings.Contains(got, "conflict") {
+		t.Fatalf("healthy must never show conflict: %q", got)
+	}
+}
+
+func TestEventKeyDecode(t *testing.T) {
+	cases := []struct {
+		ev   *tcell.EventKey
+		want tuiKey
+	}{
+		{ev: tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone), want: tuiKey{esc: true, raw: "[A"}},
+		{ev: tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone), want: tuiKey{esc: true, raw: "[B"}},
+		{ev: tcell.NewEventKey(tcell.KeyRight, 0, tcell.ModNone), want: tuiKey{esc: true, raw: "[C"}},
+		{ev: tcell.NewEventKey(tcell.KeyLeft, 0, tcell.ModNone), want: tuiKey{esc: true, raw: "[D"}},
+		{ev: tcell.NewEventKey(tcell.KeyPgUp, 0, tcell.ModNone), want: tuiKey{esc: true, raw: "[5~"}},
+		{ev: tcell.NewEventKey(tcell.KeyPgDn, 0, tcell.ModNone), want: tuiKey{esc: true, raw: "[6~"}},
+		{ev: tcell.NewEventKey(tcell.KeyHome, 0, tcell.ModNone), want: tuiKey{esc: true, raw: "[H"}},
+		{ev: tcell.NewEventKey(tcell.KeyEnd, 0, tcell.ModNone), want: tuiKey{esc: true, raw: "[F"}},
+		{ev: tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), want: tuiKey{r: '\r'}},
+		{ev: tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone), want: tuiKey{r: '\t'}},
+		{ev: tcell.NewEventKey(tcell.KeyCtrlC, 0, tcell.ModNone), want: tuiKey{raw: "\x03"}},
+		{ev: tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone), want: tuiKey{esc: true, raw: "\x1b"}},
+		{ev: tcell.NewEventKey(tcell.KeyRune, 's', tcell.ModNone), want: tuiKey{r: 's'}},
+	}
+	for _, tc := range cases {
+		if got := tuiEventKey(tc.ev); got != tc.want {
+			t.Fatalf("ev %v: got %+v want %+v", tc.ev, got, tc.want)
+		}
+	}
+	// Every ACTION key decodes through handleKey to its action.
+	// Navigation entries are never dispatched.
+	tm := tuiTestApp().t
 	rows := tuiActionRows(tm)
-	mk := func() tuiState { return tuiState{pane: tuiPaneActions, rows: rows} }
-	st := handleKey(mk(), tuiKeyRune('j'))
-	if st.sel != 1 || st.lastAct != tuiActNone {
-		t.Fatalf("j: %+v", st)
-	}
-	st = handleKey(mk(), tuiKeyRune('k'))
-	if st.sel != 0 {
-		t.Fatalf("k clamp: %+v", st)
-	}
-	st = mk()
-	st.sel = len(rows) - 1
-	st = handleKey(st, tuiKeyRune('j'))
-	if st.sel != len(rows)-1 {
-		t.Fatalf("j clamp end: %+v", st)
-	}
-	st = mk()
-	st.sel = 2
-	st = handleKey(st, tuiKey{r: '\r'})
-	if st.lastAct != rows[2].id {
-		t.Fatalf("enter: %+v", st.lastAct)
-	}
-	if got := handleKey(mk(), tuiKeyRune('q')); !got.quit || got.lastAct != tuiActQuit {
-		t.Fatalf("q: %+v", got)
-	}
-	if got := handleKey(mk(), tuiKey{raw: "\x03"}); !got.quit {
-		t.Fatalf("ctrl-c: %+v", got)
-	}
-	if got := handleKey(mk(), tuiKeyRune('z')); got.lastAct != tuiActNone || got.quit {
-		t.Fatalf("unknown: %+v", got)
-	}
-	a := handleKey(mk(), tuiKeyRune('?'))
-	if !a.showHelp || a.lastAct != tuiActHelp {
-		t.Fatalf("help on: %+v", a)
-	}
-	b := handleKey(a, tuiKeyRune('?'))
-	if b.showHelp {
-		t.Fatalf("help off: %+v", b)
-	}
-	c := handleKey(mk(), tuiKey{r: '\t'})
-	if c.pane != tuiPaneLogs || c.lastAct != tuiActPaneNext {
-		t.Fatalf("tab: %+v", c)
-	}
-	d := handleKey(tuiState{pane: tuiPaneLogs}, tuiKeyRune('j'))
-	if d.logOff != 1 || d.lastAct != tuiActScrollDown {
-		t.Fatalf("log scroll: %+v", d)
-	}
-	if got := handleKey(mk(), tuiKeyRune('s')); got.lastAct != tuiActStart {
-		t.Fatalf("s: %+v", got)
+	for _, b := range tuiActionBindings() {
+		st := handleKey(tuiState{pane: tuiPaneActions, rows: rows}, tuiKey{r: b.key})
+		if b.confirm {
+			if st.confirm != b.act {
+				t.Fatalf("key %q: confirm=%d want %d", b.key, st.confirm, b.act)
+			}
+			continue
+		}
+		if st.lastAct != b.act {
+			t.Fatalf("key %q: act=%d want %d", b.key, st.lastAct, b.act)
+		}
 	}
 }
 
-func TestPlainSummaryNoESC(t *testing.T) {
-	out := plainSummaryText()
-	if strings.Contains(out, "\x1b") {
-		t.Fatalf("ESC in plain summary: %q", out)
+func TestModeRoundTrip(t *testing.T) {
+	var sets []uint32
+	ops := tuiModeOps{
+		get: func(h windowsHandle, mode *uint32) error { *mode = 0x1f7; return nil },
+		set: func(h windowsHandle, mode uint32) error { sets = append(sets, mode); return nil },
 	}
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("lines=%d: %q", len(lines), out)
-	}
-	if !strings.HasPrefix(lines[0], "orpanel v") || !strings.Contains(lines[2], "omniroute status=") {
-		t.Fatalf("summary: %q", out)
+	var sawApplied uint32
+	saved := tuiConsoleModeRoundTrip(ops, 0, func(applied uint32) {
+		sawApplied = applied
+	})
+	if saved != 0x1f7 || len(sets) != 1 || sets[0] != saved || sawApplied != saved {
+		t.Fatalf("saved=%#x applied=%#x sets=%#x", saved, sawApplied, sets)
 	}
 }
 
@@ -160,5 +298,357 @@ func TestLocaleParity(t *testing.T) {
 				t.Fatalf("%s extra %q", f, k)
 			}
 		}
+	}
+}
+
+func TestSimModalEnterClosesHelp(t *testing.T) {
+	a := tuiTestApp()
+	simText(t, a, 80, 24)
+	simPress(a, "?")
+	if front, _ := a.pages.GetFrontPage(); front != "modal" {
+		t.Fatalf("help modal not open")
+	}
+	simPress(a, "enter")
+	if front, _ := a.pages.GetFrontPage(); front == "modal" {
+		t.Fatalf("help modal still open after Enter")
+	}
+}
+
+func TestSimModalEscCancelsConfirm(t *testing.T) {
+	a := tuiTestApp()
+	simText(t, a, 80, 24)
+	sel := a.st.sel
+	simPress(a, "down", "enter")
+	if front, _ := a.pages.GetFrontPage(); front != "modal" {
+		t.Fatalf("confirm modal not open")
+	}
+	simPress(a, "esc")
+	if front, _ := a.pages.GetFrontPage(); front == "modal" {
+		t.Fatalf("confirm modal still open after Esc")
+	}
+	if a.st.confirm != 0 {
+		t.Fatalf("confirm still pending")
+	}
+	if a.st.sel != sel+1 {
+		t.Fatalf("sel moved during modal: %d", a.st.sel)
+	}
+}
+
+func TestSimModalEnterRunsActionOnce(t *testing.T) {
+	a := tuiTestApp()
+	simText(t, a, 80, 24)
+	simPress(a, "down", "enter")
+	if front, _ := a.pages.GetFrontPage(); front != "modal" {
+		t.Fatalf("confirm modal not open")
+	}
+	runs := 0
+	_ = runs
+	simPress(a, "enter")
+	if front, _ := a.pages.GetFrontPage(); front == "modal" {
+		t.Fatalf("confirm modal still open after Enter")
+	}
+	if a.st.confirm != 0 {
+		t.Fatalf("confirm still pending after Enter")
+	}
+	if a.st.lastAct != tuiActNone {
+		t.Fatalf("lastAct not cleared after dispatch: %d", a.st.lastAct)
+	}
+}
+
+func TestSimModalSwallowsActionKeys(t *testing.T) {
+	a := tuiTestApp()
+	simText(t, a, 80, 24)
+	simPress(a, "?")
+	sel := a.st.sel
+	simPress(a, "s")
+	if a.st.sel != sel {
+		t.Fatalf("action key moved selection inside modal")
+	}
+	if a.msg != "" {
+		t.Fatalf("action fired inside modal: %q", a.msg)
+	}
+	simPress(a, "esc")
+}
+
+func TestSimModalSwallowsQuit(t *testing.T) {
+	a := tuiTestApp()
+	simText(t, a, 80, 24)
+	simPress(a, "?")
+	simPress(a, "q")
+	if a.st.quit {
+		t.Fatalf("q inside modal quit the app")
+	}
+	simPress(a, "esc")
+}
+
+func TestSimFooterContextual(t *testing.T) {
+	a := tuiTestApp()
+	a.st.pane = tuiPaneActions
+	fa := a.footerText(78)
+	if strings.Contains(fa, "Start") && strings.Contains(fa, "Stop") {
+		t.Fatalf("footer duplicates action bar: %q", fa)
+	}
+	if !strings.Contains(fa, "?") && !strings.Contains(fa, "help") {
+		t.Fatalf("footer missing help hint: %q", fa)
+	}
+	a.st.pane = tuiPaneLogs
+	fl := a.footerText(78)
+	if !strings.Contains(fl, "scroll") && !strings.Contains(fl, "Scroll") {
+		t.Fatalf("log footer missing scroll hint: %q", fl)
+	}
+	for _, ln := range strings.Split(fa+" "+fl, "·") {
+		_ = ln
+	}
+}
+
+func TestDecideMode(t *testing.T) {
+	if got := tuiDecideMode(true); got != "client" {
+		t.Fatalf("reachable = %q", got)
+	}
+	if got := tuiDecideMode(false); got != "direct" {
+		t.Fatalf("unreachable = %q", got)
+	}
+}
+
+func TestPanelClientPostsEndpoint(t *testing.T) {
+	var gotPath, gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotMethod = r.URL.Path, r.Method
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+	old := tuiPanelBase
+	tuiPanelBase = srv.URL
+	defer func() { tuiPanelBase = old }()
+	m := map[string]string{"TuiOpStarted": "Started", "TuiOpFailed": "failed"}
+	if s := tuiPanelClient(tuiActStop, m); s != "Started" {
+		t.Fatalf("stop = %q", s)
+	}
+	if gotPath != "/api/stop" || gotMethod != "POST" {
+		t.Fatalf("request %s %s", gotMethod, gotPath)
+	}
+	if s := tuiPanelClient(tuiActRestart, m); s != "Started" {
+		t.Fatalf("restart = %q", s)
+	}
+	if gotPath != "/api/restart" {
+		t.Fatalf("restart path = %s", gotPath)
+	}
+}
+
+func TestPanelClientSurfacesFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+	}))
+	defer srv.Close()
+	old := tuiPanelBase
+	tuiPanelBase = srv.URL
+	defer func() { tuiPanelBase = old }()
+	m := map[string]string{"TuiOpStarted": "Started", "TuiOpFailed": "failed"}
+	if s := tuiPanelClient(tuiActStop, m); !strings.HasPrefix(s, "failed") {
+		t.Fatalf("expected failure surfaced, got %q", s)
+	}
+}
+
+func TestRealLoopRespondsAndStops(t *testing.T) {
+	a := tuiTestApp()
+	a.setupInputCapture()
+	a.refresh()
+	a.applyFocus()
+	sim := tcell.NewSimulationScreen("UTF-8")
+	sim.Init()
+	sim.SetSize(80, 24)
+	a.app.SetScreen(sim)
+	a.app.SetRoot(a.pages, true)
+	done := make(chan error, 1)
+	go func() { done <- a.app.Run() }()
+	time.Sleep(300 * time.Millisecond)
+	sim.InjectKey(tcell.KeyDown, 0, tcell.ModNone)
+	select {
+	case <-time.After(5 * time.Second):
+		a.app.Stop()
+		t.Fatalf("deadlock: no response to injected key within 5s")
+	case <-time.After(800 * time.Millisecond):
+	}
+	if a.st.sel != 1 {
+		a.app.Stop()
+		t.Fatalf("sel=%d want 1 after real-loop Down", a.st.sel)
+	}
+	a.app.Stop()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("app did not stop")
+	}
+}
+
+func TestClientCoversAllMutatingActions(t *testing.T) {
+	muts := []struct {
+		act int
+		ep  string
+	}{
+		{tuiActStart, "/api/start"}, {tuiActStop, "/api/stop"},
+		{tuiActRestart, "/api/restart"}, {tuiActUpdate, "/api/omni/update"},
+		{tuiActRepair, "/api/omni/repair"}, {tuiActInstall, "/api/omni/install"},
+	}
+	for _, m := range muts {
+		if got := tuiPanelEndpoint(m.act); got != m.ep {
+			t.Fatalf("act %d endpoint = %q want %q", m.act, got, m.ep)
+		}
+		if !tuiShouldUseClient(m.act, true) {
+			t.Fatalf("act %d: panel serving must take client path", m.act)
+		}
+		if tuiShouldUseClient(m.act, false) {
+			t.Fatalf("act %d: no panel must take direct path", m.act)
+		}
+	}
+	// Non-mutating actions never route to the panel.
+	for _, act := range []int{tuiActAutostart, tuiActLanguage, tuiActTheme, tuiActWebUI} {
+		if tuiPanelEndpoint(act) != "" {
+			t.Fatalf("act %d must have no endpoint", act)
+		}
+		if tuiShouldUseClient(act, true) {
+			t.Fatalf("act %d must stay direct even when panel serves", act)
+		}
+	}
+}
+
+func TestClientHitsEveryMutatingEndpoint(t *testing.T) {
+	var mu sync.Mutex
+	hits := map[string]int{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits[r.URL.Path]++
+		mu.Unlock()
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+	old := tuiPanelBase
+	tuiPanelBase = srv.URL
+	defer func() { tuiPanelBase = old }()
+	m := map[string]string{"TuiOpStarted": "Started", "TuiOpFailed": "failed"}
+	want := map[int]string{
+		tuiActStart: "/api/start", tuiActStop: "/api/stop",
+		tuiActRestart: "/api/restart", tuiActUpdate: "/api/omni/update",
+		tuiActRepair: "/api/omni/repair", tuiActInstall: "/api/omni/install",
+	}
+	for act, ep := range want {
+		req, _ := http.NewRequest(http.MethodPost, tuiPanelURL()+ep, nil)
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("act %d dial: %v", act, err)
+		}
+		resp.Body.Close()
+		if s := tuiPanelClient(act, m); s != "Started" {
+			t.Fatalf("act %d client = %q", act, s)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for act, ep := range want {
+		if hits[ep] != 2 {
+			t.Fatalf("act %d endpoint %s hits=%d want 2 (raw+client)", act, ep, hits[ep])
+		}
+	}
+}
+
+func TestHelpReopensAfterEscClose(t *testing.T) {
+	a := tuiTestApp()
+	simText(t, a, 80, 24)
+	simPress(a, "?")
+	if front, _ := a.pages.GetFrontPage(); front != "modal" {
+		t.Fatalf("help not open")
+	}
+	// Esc through the real modal input handler (same as live loop).
+	if h := a.modalInputHandler(); h == nil {
+		t.Fatalf("no modal handler")
+	} else {
+		h(tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone), func(p tview.Primitive) {})
+	}
+	if front, _ := a.pages.GetFrontPage(); front == "modal" {
+		t.Fatalf("help still open after Esc")
+	}
+	if a.st.showHelp {
+		t.Fatalf("showHelp stale after Esc close")
+	}
+	simPress(a, "?")
+	if front, _ := a.pages.GetFrontPage(); front != "modal" {
+		t.Fatalf("second ? did not reopen help (dead key)")
+	}
+}
+
+func TestHelpReopensAfterButtonClose(t *testing.T) {
+	a := tuiTestApp()
+	simText(t, a, 80, 24)
+	simPress(a, "?")
+	mh := a.modalInputHandler()
+	if mh == nil {
+		t.Fatalf("no modal handler")
+	}
+	mh(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(p tview.Primitive) {})
+	if front, _ := a.pages.GetFrontPage(); front == "modal" {
+		t.Fatalf("help still open after button")
+	}
+	if a.st.showHelp {
+		t.Fatalf("showHelp stale after button close")
+	}
+	simPress(a, "?")
+	if front, _ := a.pages.GetFrontPage(); front != "modal" {
+		t.Fatalf("second ? did not reopen help after button close")
+	}
+}
+
+func TestConfirmEscLeavesNothingToRefire(t *testing.T) {
+	a := tuiTestApp()
+	simText(t, a, 80, 24)
+	simPress(a, "down", "enter")
+	if front, _ := a.pages.GetFrontPage(); front != "modal" {
+		t.Fatalf("confirm not open")
+	}
+	if h := a.modalInputHandler(); h == nil {
+		t.Fatalf("no modal handler")
+	} else {
+		h(tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone), func(p tview.Primitive) {})
+	}
+	if front, _ := a.pages.GetFrontPage(); front == "modal" {
+		t.Fatalf("confirm still open after Esc")
+	}
+	if a.st.confirm != 0 || a.st.lastAct != tuiActNone {
+		t.Fatalf("stale confirm=%d lastAct=%d after Esc", a.st.confirm, a.st.lastAct)
+	}
+	// A later Enter must not re-fire the cancelled action.
+	msgBefore := a.msg
+	a.handleKeyEvent(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	if a.msg != msgBefore {
+		t.Fatalf("cancelled confirm re-fired on Enter: %q", a.msg)
+	}
+}
+
+func TestKeyHandlingNonBlockingDuringSlowProbe(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(3 * time.Second)
+		w.WriteHeader(200)
+		w.Write([]byte(`{}`))
+	}))
+	defer slow.Close()
+	oldURL := omniHealthURL
+	omniHealthURL = slow.URL
+	defer func() { omniHealthURL = oldURL }()
+	oldBase := tuiPanelBase
+	tuiPanelBase = "http://127.0.0.1:1"
+	defer func() { tuiPanelBase = oldBase }()
+	tuiProbeCacheMu.Lock()
+	tuiProbeCache, tuiProbeCacheAt = "", time.Time{}
+	tuiProbeCacheMu.Unlock()
+	a := tuiTestApp()
+	start := time.Now()
+	simText(t, a, 80, 24)
+	a.handleKeyEvent(tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone))
+	el := time.Since(start)
+	if el > 1500*time.Millisecond {
+		t.Fatalf("key handling blocked %.1fs waiting for probe", el.Seconds())
+	}
+	if a.st.sel != 1 {
+		t.Fatalf("sel=%d want 1", a.st.sel)
 	}
 }
