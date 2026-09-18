@@ -19,7 +19,14 @@ durumsal alt bilgi. Gerisi veri panelleri. Oranlar:
 - Etiket sütunu 11 hücre sabit (`Versiyon  `, `yönetim   ` hizalı).
 - Kayıtlar başlığı kaydırma göstergesi taşır: `Kayıtlar ▲ 42/48 ▼`.
   Boş panel asla boş kutu değil: `(kayıt yok — panel yeni başladı)` satırı.
-- İşlemler artık tek satırlık çip satırı değil; ok/fare ile gezilen dikey liste.
+- İşlemler `tview.List`'tir (elle çizilmiş TextView şeridi DEĞİL — mimari
+  zorunluluk, bkz. §9a): klavye gezintisi, seçim, Enter-çalıştırma,
+  tıkla-seç/çalıştır ve tekerlek tek testli gerçeklemede birleşir;
+  `SetSelectedStyle` ters-video seçimi çizer. Bakım/Ayarlar alt grupları
+  ayrı `List`'tir (tek listede seçilemeyen başlık satırı YOK — neden:
+  başlık satırları seçim dizinini kaydırır ve "Enter komşuyu çalıştırır"
+  sınıfını geri getirir). Taşma işareti (`… +N daha ↓`) ve yardım ekranı
+  AYNI liste verisinden üretilir.
 
 ## 2. Bağlamsal eylemler (durum modeli)
 
@@ -44,24 +51,25 @@ durumsal alt bilgi. Gerisi veri panelleri. Oranlar:
   (`q`) her zaman onay ister. `q` onayı panel/tepsi çalışmaya devam eder
   der ve güvenli varsayılan `vazgeç`'tir.
 
-## 3. Fare modeli
+## 3. Fare modeli (kütüphane denetlendi: tview v0.42)
 
-- Hover satırı `›` işareti + kalın gösterir; seçim `►` + ters video.
-  İkisi aynı anda görünebilir (seçim Yeniden Başlat'ta, hover Güncelle'de).
-- Tık seçer; yıkıcı olmayanda ikinci tık / çift tık çalıştırır, yıkıcıda
-  onay penceresi açar. Tekerlek Kayıtlar/Yardım'ı kaydırır. Panele tıklamak
-  odağı taşır. Modal düğmeleri tıklanabilir; varsayılan `onayla` (Enter).
-- KUSUR (v1.4.5'te doğrulandı): fare hiç açılmıyor — uygulama
-  `EnableMouse(true)` çağırmıyor, bu yüzden tcell terminalin fare
-  protokolünü istemiyor ve hiçbir fare olayı gelmiyor. Düzeltme: tview
-  uygulamasında `EnableMouse(true)` + hover/tık/tekerlek/tıklanabilir
-  modal düğmeleri (varsayılan `onayla`).
-- Sonuçlar (dürüst): (a) fare olayı taşımayan uçta klavye yolu BİREBİR
-  aynı ve eksiksiz kalır (iki yol aynı `►` seçim göstergesi); (b) fare
-  kipi açıkken uçbirimde metin seçimi genelde Shift gerektirir — yardım
-  veya README bunu yazar.
-- Doğrulama: koşum fare enjekte edemez; en yakın kanıt, aynı işleyiciye
-  sentetik fare olayı sürmek + sahibinin terminalinde gerçek yol onayıdır.
+- TEK ÇAĞRI: `Application.EnableMouse(true)` (+ isteğe bağlı global
+  `SetMouseCapture`). Her etkileşimli ilkel zaten `MouseHandler` uygular:
+  `List`, `Table`, `TextView` (tekerlek kaydırma), `Form`→`Button` üzerinden
+  modallar, isabet testiyle `Flex`/`Grid`/`Pages`. Bugün uygulama bu çağrıyı
+  hiç yapmıyor — v1.4.5'te farenin ölü olmasının sebebi bu; tcell terminalin
+  fare protokolünü istemiyor, hiçbir fare olayı gelmiyor.
+- Davranış: hover satırı `›` + kalın; seçim `►` + ters video (`SetSelectedStyle`
+  ile çizilir, iki yol aynı gösterge). Tık seçer; yıkıcı olmayanda ikinci
+  tık çalıştırır, yıkıcıda onay penceresi açar. Tekerlek Kayıtlar/Yardım'ı
+  kaydırır. Panele tıklamak odağı taşır. Modal düğmeleri tıklanabilir;
+  varsayılan `onayla` (Enter).
+- Sonuçlar (dürüst): (a) fare olayı taşımayan uçta klavye yolu BİREBİR aynı
+  ve eksiksiz kalır; (b) fare kipi açıkken uçbirimde metin seçimi genelde
+  Shift gerektirir — yardım metni + README bunu bir satırla yazar.
+- Doğrulama: koşum gerçek fare enjekte edemez; en yakın kanıt, aynı
+  `MouseHandler` zincirine sentetik fare olayı sürmek + sahibinin
+  terminalinde gerçek yol onayıdır.
 
 ## 4. Klavye
 
@@ -120,18 +128,21 @@ TUI istemci olarak açılır. Böylece simge ilk kareden vardır.
   Gerekçe: kazara tıklanan bir `Tepsi'yi durdur`, gözetimsiz panel + ölü
   bekçi bırakır; onayı bile olsa maliyeti faydasını aşar.
 
-## 9. Menü gruplama (eylem listesi)
+## 9. Menü gruplama (eylem listesi — `tview.List` ile)
 
 Sahibi kritik/yıkıcı işlemlerin karışık listede durmasını istemiyor.
-Üst düzey İşlemler yalnızca durum eylemlerini + iki grup girişini taşır
+Üst düzey İşlemler bir `List`'tir: durum eylemleri + iki grup girişi
 (çalışıyor durumunda: Durdur, Yeniden Başlat, ▸ Bakım, ▸ Ayarlar).
-- `▸ Bakım` bir alt liste/modal açar: Kur, Onar, Güncelle (üçü de onaylı).
-- `▸ Ayarlar` bir alt liste/modal açar: Otomatik Başlat (aç/kapa),
-  Dil (döngü), Tema (döngü), Web Arayüzü.
+- `▸ Bakım` AYRI bir `List` açar (modal/alt liste): Kur *, Onar *,
+  Güncelle *. `▸ Ayarlar` AYRI bir `List` açar: Otomatik Başlat (aç/kapa),
+  Dil (döngü), Tema (döngü), Web Arayüzü. Ayrı liste seçilmesinin sebebi:
+  tek listede seçilemeyen başlık satırı, seçim dizinini kaydırır ve
+  "Enter komşuyu çalıştırır" sınıfını geri getirir (v1.4.6'daki kusur).
 - Davranış: grup satırında Enter/fare-tık grubu açar; grup içinde Esc bir
   üst düzeye döner (uygulamadan çıkmaz). Fare tekerleği grup listesinde de
-  kaydırır. Yardım ekranı grupları açık yazar (örn. `Bakım ▸ Onar *`).
-- Mockup'lar (§12) güncellendi: işlem odası grup başlıklı dikey listedir.
+  kaydırır. Yardım ekranı grupları açık yazar (örn. `Bakım ▸ Onar *`) —
+  AYNI liste verisinden üretilir; `… +N daha ↓` taşma işareti de öyle.
+- Mockup'lar (§12): işlem odası grup girişli dikey `List`'tir.
 
 ## 9b. Çıkış onayı (sahip kararı: `q` anında çıkmaz)
 
@@ -163,6 +174,7 @@ mevcut imza; `last` kaçırılan ön-ek dizinidir, `newIndex` toplam uzunluk).
 - Fare gerçek yolu yalnızca sahibinin terminalinde doğrulanabilir (koşum
   sentetik olay verir; §3'teki kanıt notuna bak).
 - `sistem` paletinde marka renklerinden vazgeçmek kabul mü?
+- `List` başına seçim stili (`SetSelectedStyle`) göz onayı bekliyor.
 
 ## 12. Mockup'lar (verbatim, kutu genişlikleri denetlendi)
 
