@@ -1297,23 +1297,40 @@ func updateTrayTexts() {
 	if mQuit != nil { mQuit.SetTitle(t["TrayQuit"]) }
 }
 
-// cleanStaleOldBinary removes a leftover <exe>.old from a previous Windows
-// swap, best-effort: in-use errors are ignored silently.
+// cleanStaleOldBinary sweeps leftover <exe>.old* sidecars from previous
+// Windows swaps (unique names since v1.4.4). Best effort, never fatal: a
+// file still mapped by a live process is left for a later start, and every
+// outcome is logged (silence hid the v1.4.0 failure chain).
 func cleanStaleOldBinary() {
 	exe, err := os.Executable()
 	if err != nil || exe == "" {
 		return
 	}
-	old := exe + ".old"
-	if _, err := os.Stat(old); err != nil {
+	dir := filepath.Dir(exe)
+	base := filepath.Base(exe)
+	matches, err := filepath.Glob(filepath.Join(dir, base+".old*"))
+	if err != nil || len(matches) == 0 {
 		return
 	}
-	if err := os.Remove(old); err == nil {
-		writeLog("INFO: removed stale %s", filepath.Base(old))
+	for _, m := range matches {
+		if m == exe || !strings.HasPrefix(filepath.Base(m), base+".old") {
+			continue
+		}
+		if err := os.Remove(m); err == nil {
+			writeLog("INFO: removed stale %s", filepath.Base(m))
+		} else {
+			writeLog("WARN: stale %s still held, will retry on a later start: %v", filepath.Base(m), err)
+		}
 	}
 }
 
 func main() {
+	// Test-only sleeper for the swap trap test: sit mapped on the exe so
+	// the harness can reproduce the owner's mapped-.old state. Exits on
+	// kill; never runs in production (env is only set by the test).
+	if os.Getenv("ORPANEL_SWAP_SLEEPER") == "1" {
+		select {}
+	}
 	loadConfig()
 	initFileLog()
 	startLogCleanup()

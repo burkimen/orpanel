@@ -179,5 +179,6 @@
   "TuiManagedLocal": "gestión: este proceso",
   "TuiOpFailed": "Operación fallida",
   "TuiThemeMsg": "tema de la interfaz web",
-  "TuiThemeNote": "TUI usa la paleta del terminal"
+  "TuiThemeNote": "TUI usa la paleta del terminal",
+  "UpdateLockedHint": "Es posible que el panel siga abierto; sal desde el menú de la bandeja e inténtalo de nuevo"
 }

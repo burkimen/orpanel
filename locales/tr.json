@@ -179,5 +179,6 @@
   "TuiManagedLocal": "yönetim: bu süreç",
   "TuiOpFailed": "İşlem başarısız",
   "TuiThemeMsg": "web arayüzü teması",
-  "TuiThemeNote": "TUI terminal paletini kullanır"
+  "TuiThemeNote": "TUI terminal paletini kullanır",
+  "UpdateLockedHint": "Panel açık olabilir; tepsi menüsünden çıkıp tekrar deneyin"
 }

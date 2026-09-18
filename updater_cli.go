@@ -279,11 +279,20 @@ func runCLIUpdate() int {
 	}
 	data, _ := os.ReadFile(applyLog)
 	out := parseBatchOutcome(string(data))
+	tail := lastLines(string(data), 10)
 	if out.code == updateExitRollback {
 		fmt.Printf("%s (%s)\n%s: %s\n", t["SettingUpdateFailed"], t["UpdateSameVersion"], t["SettingUpdateFailed"], applyLog)
 		return updateExitRollback
 	}
-	fmt.Printf("%s\n%s: %s\n", t["SettingUpdateFailed"], t["SettingUpdateFailed"], applyLog)
+	if tail != "" {
+		fmt.Printf("%s\n%s\n", t["SettingUpdateFailed"], tail)
+	} else {
+		fmt.Printf("%s\n", t["SettingUpdateFailed"])
+	}
+	if looksLocked(string(data)) {
+		fmt.Printf("%s\n", t["UpdateLockedHint"])
+	}
+	fmt.Printf("%s: %s\n", t["SettingUpdateFailed"], applyLog)
 	return updateExitFail
 }
 
@@ -303,58 +312,9 @@ func fileHash(path string) (string, error) {
 func launchWindowsSwap(exe, newExe, updateDir string) error {
 	applyScript := filepath.Join(updateDir, "apply_update.bat")
 	applyLog := filepath.Join(updateDir, "apply_update.log")
-	batContent := fmt.Sprintf(`@echo off
-set LOG="%s"
-echo [%%date%% %%time%%] waiting for old process to exit >> %%LOG%%
-timeout /t 2 /nobreak >nul
-set M=0
-:moveretry
-set /a M+=1
-echo [%%date%% %%time%%] move attempt %%M%%: move old aside >> %%LOG%%
-move /Y "%s" "%s.old" >> %%LOG%% 2>&1
-if errorlevel 1 (
-  echo [%%date%% %%time%%] move attempt %%M%% failed >> %%LOG%%
-  if %%M%% GEQ 10 goto :failmove
-  timeout /t 2 /nobreak >nul
-  goto :moveretry
-)
-set C=0
-:copyretry
-set /a C+=1
-echo [%%date%% %%time%%] copy attempt %%C%%: copy new into place >> %%LOG%%
-copy /Y "%s" "%s" >> %%LOG%% 2>&1
-if errorlevel 1 (
-  echo [%%date%% %%time%%] copy attempt %%C%% failed >> %%LOG%%
-  if %%C%% GEQ 10 goto :rollback
-  timeout /t 2 /nobreak >nul
-  goto :copyretry
-)
-echo [%%date%% %%time%%] success: swapped, cleaning up >> %%LOG%%
-del "%s" >> %%LOG%% 2>&1
-start "" "%s" --tray
-exit /b 0
-:rollback
-echo [%%date%% %%time%%] copy failed after move: rolling back old binary >> %%LOG%%
-set R=0
-:rbretry
-set /a R+=1
-move /Y "%s.old" "%s" >> %%LOG%% 2>&1
-if errorlevel 1 (
-  echo [%%date%% %%time%%] rollback attempt %%R%% failed >> %%LOG%%
-  if %%R%% GEQ 5 goto :failcopy
-  timeout /t 2 /nobreak >nul
-  goto :rbretry
-)
-echo [%%date%% %%time%%] rolled back: old binary restored, update NOT applied >> %%LOG%%
-start "" "%s" --tray
-exit /b 1
-:failmove
-echo [%%date%% %%time%%] FAILED move after 10 attempts, exe untouched >> %%LOG%%
-exit /b 1
-:failcopy
-echo [%%date%% %%time%%] FAILED copy and rollback after retries, manual repair needed >> %%LOG%%
-exit /b 1
-`, applyLog, exe, exe, newExe, exe, newExe, exe, exe, exe, exe)
+	oldName := swapOldName(exe)
+	bestEffortStopSiblings(exe)
+	batContent := buildWindowsSwapBatch(applyLog, exe, oldName, newExe, fmt.Sprintf(`start "" "%s" --tray`, exe))
 	if err := os.WriteFile(applyScript, []byte(batContent), 0644); err != nil {
 		return err
 	}

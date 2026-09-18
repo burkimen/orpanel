@@ -179,5 +179,6 @@
   "TuiManagedLocal": "managed by this process",
   "TuiOpFailed": "Operation failed",
   "TuiThemeMsg": "web UI theme",
-  "TuiThemeNote": "TUI uses the terminal palette"
+  "TuiThemeNote": "TUI uses the terminal palette",
+  "UpdateLockedHint": "Panel may still be running; quit it from the tray menu and try again"
 }
