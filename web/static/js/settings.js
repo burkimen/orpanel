@@ -198,28 +198,3 @@ async function pollUpdateStatus(info, btn, prevVersion, startedToast) {
         }
     }
 }
-
-async function waitForPanelReturn(info, btn, started) {
-    // Legacy helper, kept for compatibility; the version-derived completion
-    // in pollUpdateStatus supersedes it.
-    info.textContent = T.UpdateWaitReturn;
-    const deadline = started + 60000;
-    for (;;) {
-        await new Promise(r => setTimeout(r, 750));
-        try {
-            const res = await fetch('/api/status');
-            if (res.ok) {
-                showToast(T.SettingUpdateDone, 'ok');
-                location.reload();
-                return;
-            }
-        } catch(e) {}
-        if (Date.now() > deadline) {
-            info.textContent = T.SettingUpdateFailed;
-            showToast(T.SettingUpdateFailed, 'error');
-            btn.disabled = false;
-            return;
-        }
-        info.textContent = T.UpdateGone;
-    }
-}

@@ -308,9 +308,10 @@ start "" "%s" --tray
 		cmd.SysProcAttr = relaunchAttrs()
 		cmd.Start()
 	}
-	// Exit current process
+	// Exit current process. Bound: this delay must stay below the batch's
+	// `timeout /t 2` so the old process is gone before the swap runs.
 	setUpdatePhase(updateRestarting, current, latest, "")
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1200 * time.Millisecond)
 	os.Exit(0)
 	return nil
 }
