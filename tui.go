@@ -238,6 +238,11 @@ func simFrame(a *tuiApp, sim tcell.SimulationScreen, w, h int) string {
 	sim.Init()
 	sim.SetSize(w, h)
 	sim.Clear()
+	// Harness has no event loop, so no afterDraw ever runs: publish the
+	// size the production afterDraw would, so header/bar degrade as live.
+	a.mu.Lock()
+	a.lastW, a.lastH = w, h
+	a.mu.Unlock()
 	a.applyBodyClass(w)
 	a.refresh()
 	a.applyFocus()
@@ -324,6 +329,11 @@ func runTuiScript(names []string) {
 		if _, err := fmt.Sscanf(v, "%dx%d", &ww, &hh); err == nil && ww > 0 && hh > 0 {
 			w, h = ww, hh
 		}
+	}
+	// ORPANEL_TUI_LANG pins the dump locale (default: whatever is saved).
+	// Primary frames are dumped in tr, the owner's locale.
+	if lang := os.Getenv("ORPANEL_TUI_LANG"); lang != "" {
+		setCurrentLang(lang)
 	}
 	a := newTuiApp()
 	// Harness runs on its own goroutine (not the event loop), so warming

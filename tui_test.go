@@ -181,8 +181,14 @@ func TestSimHelpModal(t *testing.T) {
 	if !a.pages.HasPage("modal") {
 		t.Fatalf("help modal page missing")
 	}
-	if !strings.Contains(f, "Navigation") {
-		t.Fatalf("help body missing:\n%s", f)
+	// Every action must be listed with its key; destructive ones marked.
+	for _, b := range tuiActionBindings() {
+		if !strings.Contains(f, string(b.key)) {
+			t.Fatalf("help missing key %q:\n%s", b.key, f)
+		}
+	}
+	if !strings.Contains(f, "*") {
+		t.Fatalf("help missing confirm markers:\n%s", f)
 	}
 }
 
@@ -194,11 +200,51 @@ func TestSimConfirmModal(t *testing.T) {
 	if !a.pages.HasPage("modal") {
 		t.Fatalf("confirm modal page missing")
 	}
-	if !strings.Contains(f, "Confirm") {
-		t.Fatalf("confirm title missing:\n%s", f)
+	// Names the action ([x] + label), its target, and the safe default.
+	// Kept as the permanent visual gate for the destructive-action path.
+	if !strings.Contains(f, "[x]") {
+		t.Fatalf("confirm missing action key [x]:\n%s", f)
+	}
+	if !strings.Contains(f, "Esc") {
+		t.Fatalf("confirm missing safe default Esc:\n%s", f)
+	}
+	if !strings.Contains(f, "OmniRoute") {
+		t.Fatalf("confirm missing action target:\n%s", f)
 	}
 }
 
+// TestBarClipsWholeChips gates mid-word clipping: at 80 and 120 cols the
+// rendered bar row must end on a chip boundary or the overflow marker —
+// never with a sliced label (e.g. "Idiom" cut to "Idio", "In" cut to "I").
+func TestBarClipsWholeChips(t *testing.T) {
+	for _, w := range []int{80, 120} {
+		a := tuiTestApp()
+		f := simText(t, a, w, 24)
+		var barRow string
+		for _, ln := range strings.Split(f, "\n") {
+			if strings.Contains(ln, "[s]") {
+				barRow = ln
+			}
+		}
+		if barRow == "" {
+			t.Fatalf("width %d: no bar row in frame:\n%s", w, f)
+		}
+		// Last visible token must be a whole chip or the marker.
+		tail := strings.TrimRight(barRow, " │╭╮╰╯┌┐└┘─")
+		if tail == "" || strings.HasSuffix(tail, "[") || strings.HasSuffix(tail, "[i") {
+			t.Fatalf("width %d: bar clipped mid-chip: %q", w, barRow)
+		}
+	}
+}
+
+// TestBarOverflowMarker fires on narrow widths: some chip must be replaced
+// by the "+N" marker rather than sliced.
+func TestBarOverflowMarker(t *testing.T) {
+	a := tuiTestApp()
+	if got := a.barText(40); !strings.Contains(got, "+") {
+		t.Fatalf("narrow bar has no overflow marker: %q", got)
+	}
+}
 func TestSimNonTTYFallback(t *testing.T) {
 	s := plainSummaryText()
 	if !strings.Contains(s, "orpanel v") {

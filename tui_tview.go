@@ -128,6 +128,20 @@ func tuiTr(key string, t map[string]string, fb string) string {
 	return fb
 }
 
+// headerText degrades by dropping whole fields (never slicing words): full
+// line at wide widths, version+identity only when narrow.
+func headerText(width int, appVer, omniVer, lang, theme, clock string) string {
+	full := fmt.Sprintf(" OrPanel v%s  OmniRoute %s  %s/%s  %s", appVer, omniVer, lang, theme, clock)
+	if width <= 0 || len([]rune(full)) <= width {
+		return full
+	}
+	short := fmt.Sprintf(" OrPanel v%s  OmniRoute %s", appVer, omniVer)
+	if len([]rune(short)) <= width {
+		return short
+	}
+	return fmt.Sprintf(" OrPanel v%s", appVer)
+}
+
 func newTuiApp() *tuiApp {
 	a := &tuiApp{app: tview.NewApplication(), t: loadTranslations(getCurrentLang()), follow: true}
 	a.status = tview.NewTextView().SetDynamicColors(!tuiNoColor()).SetScrollable(false)
@@ -188,29 +202,65 @@ func (a *tuiApp) footerTextLocked(width int) string {
 }
 
 
-func (a *tuiApp) helpBody() string {
-	var b strings.Builder
-	b.WriteString(tuiTr("TuiHelpNavTitle", a.t, "Navigation") + "\n")
-	b.WriteString(" " + tuiTr("TuiHintScrollLine", a.t, "arrows/j/k select") + "\n")
-	b.WriteString(" " + tuiTr("TuiNavHint", a.t, "Tab switch pane") + "\n\n")
-	b.WriteString(tuiTr("TuiHelpActTitle", a.t, "Actions") + " (" + tuiTr("TuiConfirmLegend", a.t, "* needs confirm") + ")\n")
+// helpLines returns the help modal as whole lines: one row per action
+// ("[key] label", destructive marked with *), navigation hints joined
+// into whole pairs. Short enough that the modal (lines+6) fits 80x24.
+func (a *tuiApp) helpLines() []string {
+	var lines []string
+	lines = append(lines, tuiTr("TuiHelpActTitle", a.t, "Actions")+" ("+tuiTr("TuiConfirmLegend", a.t, "* needs confirm")+")")
 	for _, bd := range tuiActionBindings() {
 		lbl := tuiTr(bd.label, a.t, string(bd.key))
+		mark := "  "
 		if bd.confirm {
-			fmt.Fprintf(&b, " %c  %s *\n", bd.key, lbl)
-		} else {
-			fmt.Fprintf(&b, " %c  %s\n", bd.key, lbl)
+			mark = " *"
 		}
+		// One row per action, key cap first: phrases never split.
+		lines = append(lines, fmt.Sprintf(" [%c] %s%s", bd.key, oneLine(lbl), mark))
 	}
-	b.WriteString("\n" + tuiTr("TuiHelpNavTitle", a.t, "Navigation") + "\n")
+	lines = append(lines, "")
+	// Navigation: two whole-pair rows (select/activate, pane/cancel) plus
+	// one short hints row — keys stay discoverable without overflowing.
+	var pairs []string
 	for _, bd := range tuiFooterBindings(tuiPaneActions) {
 		if bd.scope != tuiScopeGlobal && bd.scope != tuiScopePane {
 			continue
 		}
 		lbl := tuiTr(bd.label, a.t, tuiKeyName(bd))
-		fmt.Fprintf(&b, " %s  %s\n", tuiKeyName(bd), lbl)
+		pairs = append(pairs, tuiKeyName(bd)+" "+lbl)
 	}
-	return strings.TrimRight(b.String(), "\n")
+	lines = append(lines, wrapPairs(pairs, 40)...)
+	return lines
+}
+
+// wrapPairs joins pairs with " · ", breaking only between pairs.
+func wrapPairs(pairs []string, width int) []string {
+	var out []string
+	cur := ""
+	for _, p := range pairs {
+		if cur == "" {
+			cur = " " + p
+			continue
+		}
+		if len([]rune(cur+" · "+p)) > width {
+			out = append(out, cur)
+			cur = " " + p
+			continue
+		}
+		cur += " · " + p
+	}
+	if cur != "" {
+		out = append(out, cur)
+	}
+	return out
+}
+
+func (a *tuiApp) helpBody() string {
+	return strings.Join(a.helpLines(), "\n")
+}
+
+// oneLine collapses embedded newlines so each binding stays on one row.
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // closeModalSync removes the modal page and clears overlay-scoped state so
@@ -226,12 +276,19 @@ func (a *tuiApp) closeModalSync() {
 	a.refreshLocked()
 	a.applyFocusLocked()
 }
-
-// showModal opens a centred modal over the stable root. The main page stays
-// mounted; closing removes the overlay page — no SetRoot, so focus and the
-// selected action index in a.st survive untouched. Focus moves into the
-// modal so Enter/Esc/Tab reach its buttons via the normal tview path.
 func (a *tuiApp) showModal(title, body, hint string, buttons []string, onOK func(), onClose func()) {
+	// Fit first (word-wise wrap + height budget), then pad to the widest
+	// surviving line so tview's word-wrap has nothing left to reflow: the
+	// box sizes to content instead of clipping it mid-word.
+	w, h := a.modalFitSize()
+	if w > 0 {
+		body = fitModalWidth(body, w-2)
+		hint = fitModalHint(hint, modalInnerWidth(body))
+	}
+	if h > 0 {
+		body = fitModalBody(body, hint, len(buttons), h)
+	}
+	body = padToWidth(body)
 	m := tview.NewModal().
 		SetText(body + "\n\n" + hint).
 		AddButtons(buttons).
@@ -253,11 +310,118 @@ func (a *tuiApp) showModal(title, body, hint string, buttons []string, onOK func
 	}
 	a.app.SetFocus(m)
 }
+// modalFitSize returns the usable screen size for a modal, or 0s when
+// unknown (production fills it in on the first draw).
+func (a *tuiApp) modalFitSize() (int, int) {
+	return a.lastW, a.lastH
+}
+
+// fitModalBody keeps the first lines that fit in height (reserving 6 rows
+// for modal chrome: borders, buttons, hint) and replaces the cut tail with
+// a "+N more — see full list" marker line.
+func fitModalBody(body, hint string, nButtons, height int) string {
+	lines := strings.Split(body, "\n")
+	hintLines := 0
+	if hint != "" {
+		hintLines = len(strings.Split(hint, "\n"))
+	}
+	budget := height - 6 - 2 - hintLines
+	if budget < 4 {
+		budget = 4
+	}
+	_ = nButtons
+	if len(lines) <= budget {
+		return strings.Join(lines, "\n")
+	}
+	kept := lines[:budget-1]
+	marker := fmt.Sprintf("… +%d more", len(lines)-(budget-1))
+	return strings.Join(append(kept, marker), "\n")
+}
+
+// fitModalWidth wraps overlong lines word-wise so the modal never exceeds
+// width (reserving 10 columns for borders and centering margin). Wrapping
+// happens only at spaces, so phrases stay intact.
+func fitModalWidth(body string, width int) string {
+	max := width - 10
+	if max < 16 {
+		max = 16
+	}
+	var out []string
+	for _, ln := range strings.Split(body, "\n") {
+		out = append(out, wrapLineWords(ln, max)...)
+	}
+	return strings.Join(out, "\n")
+}
+
+// fitModalHint wraps the hint line(s) at the same width so the hint row
+// never overflows the modal box mid-phrase.
+func fitModalHint(hint string, width int) string {
+	max := width - 10
+	if max < 16 {
+		max = 16
+	}
+	var out []string
+	for _, ln := range strings.Split(hint, "\n") {
+		out = append(out, wrapLineWords(ln, max)...)
+	}
+	return strings.Join(out, "\n")
+}
+
+func modalInnerWidth(body string) int {
+	w := 0
+	for _, ln := range strings.Split(body, "\n") {
+		if n := len([]rune(ln)); n > w {
+			w = n
+		}
+	}
+	return w
+}
+
+// wrapLineWords breaks one line at spaces only; a single overlong word is
+// kept whole (the modal centers, it never slices a word).
+func wrapLineWords(ln string, max int) []string {
+	if len([]rune(ln)) <= max {
+		return []string{ln}
+	}
+	words := strings.Fields(ln)
+	if len(words) <= 1 {
+		return []string{ln}
+	}
+	var out []string
+	cur := words[0]
+	for _, w := range words[1:] {
+		if len([]rune(cur+" "+w)) > max {
+			out = append(out, cur)
+			cur = w
+			continue
+		}
+		cur += " " + w
+	}
+	return append(out, cur)
+}
+
+// padToWidth pads every line with spaces to the widest rune width so the
+// modal sizes to its content instead of wrapping mid-word.
+func padToWidth(s string) string {
+	lines := strings.Split(s, "\n")
+	w := 0
+	for _, ln := range lines {
+		if n := len([]rune(ln)); n > w {
+			w = n
+		}
+	}
+	for i, ln := range lines {
+		lines[i] = ln + strings.Repeat(" ", w-len([]rune(ln)))
+	}
+	return strings.Join(lines, "\n")
+}
 
 func (a *tuiApp) confirmAction(act int) {
 	b, _ := tuiBindingByAct(act)
 	lbl := tuiTr(b.label, a.t, string(b.key))
-	a.showModal(tuiTr("TuiConfirmTitle", a.t, "Confirm"), lbl+"?", tuiTr("TuiConfirmHint", a.t, "Enter confirm · Esc cancel"), []string{tuiTr("TuiConfirmOK", a.t, "confirm"), tuiTr("TuiConfirmCancel", a.t, "cancel")}, func() {
+	// The modal names the action, its key, and the safe default (Esc).
+	body := fmt.Sprintf("[%c] %s\n%s", b.key, lbl, tuiTr("TuiConfirmTarget", a.t, "OmniRoute service"))
+	a.showModal(tuiTr("TuiConfirmTitle", a.t, "Confirm"), body+"?", tuiTr("TuiConfirmHint", a.t, "Enter confirm · Esc cancel"), []string{tuiTr("TuiConfirmOK", a.t, "confirm"), tuiTr("TuiConfirmCancel", a.t, "cancel")}, func() {
 		msg := tuiDoAction(act, a.t)
 		a.setMsg(msg)
 	}, func() {
@@ -306,7 +470,7 @@ func (a *tuiApp) refreshLocked() {
 	state, stateNote := tuiDisplayState(snap, probe, a.t)
 	snap.status = state
 	clock := time.Now().Format("15:04:05")
-	a.header.SetText(fmt.Sprintf(" OrPanel v%s  OmniRoute %s  %s/%s  %s", snap.appVer, snap.omniVer, snap.lang, snap.theme, clock))
+	a.header.SetText(headerText(a.lastW, snap.appVer, snap.omniVer, snap.lang, snap.theme, clock))
 	var sb strings.Builder
 	rows := [][2]string{
 		{tuiTr("TuiStatus", a.t, "Status"), state},
@@ -354,17 +518,21 @@ func (a *tuiApp) refreshLocked() {
 		}
 		switch lvl {
 		case "err":
-			fmt.Fprintf(a.logs, "[red]%s[white]\n", tview.Escape(ln))
+			fmt.Fprintf(a.logs, "[red]%s[-]\n", tview.Escape(ln))
 		case "warn":
-			fmt.Fprintf(a.logs, "[yellow]%s[white]\n", tview.Escape(ln))
+			fmt.Fprintf(a.logs, "[yellow]%s[-]\n", tview.Escape(ln))
 		default:
-			fmt.Fprintf(a.logs, "[gray]%s[white]\n", tview.Escape(ln))
+			fmt.Fprintf(a.logs, "%s\n", tview.Escape(ln))
 		}
 	}
 	if a.st.logOff <= 0 && a.follow {
 		a.logs.ScrollToEnd()
 	}
-	a.bar.SetText(a.barTextLocked())
+	bw := a.lastW
+	if bw <= 0 {
+		bw = 80
+	}
+	a.bar.SetText(a.barTextLocked(bw - 2))
 	fw := a.lastW
 	if fw <= 0 {
 		fw = 80
@@ -406,18 +574,22 @@ func tuiDisplayState(snap tuiSnapshot, probe string, t map[string]string) (strin
 	}
 }
 
-// barText renders the action bar; chips never wrap mid-chip (joined with
-// two spaces, tview wraps only at spaces since Wrap(false) keeps words).
-// The selected chip is highlighted; focus on the bar is shown in its title.
+// barText renders the action bar with whole-chip clipping: chips that do not
+// fit are replaced by an overflow marker ("… +N"), so no chip is ever sliced
+// mid-word and no action is undiscoverable (the help modal lists every key).
+// The bar TextView also grows to two rows when needed (see mainLayout).
 func (a *tuiApp) barText(width int) string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.barTextLocked()
+	return a.barTextLocked(width)
 }
 
-func (a *tuiApp) barTextLocked() string {
+// barChips renders every action chip; the selected chip uses the reverse
+// attribute ([::r]) so it survives any palette, with ">"…"<" kept as the
+// non-colour signal for NO_COLOR and colour-blind users.
+func (a *tuiApp) barChips() []string {
 	pane, sel := a.st.pane, a.st.sel
-	var sb strings.Builder
+	chips := make([]string, 0, len(tuiActionBindings()))
 	for i, b := range tuiActionBindings() {
 		lbl := tuiTr(b.label, a.t, string(b.key))
 		c := fmt.Sprintf("[%c] %s", b.key, lbl)
@@ -425,17 +597,44 @@ func (a *tuiApp) barTextLocked() string {
 			if tuiNoColor() {
 				c = ">" + c + "<"
 			} else {
-				c = "[black:yellow]" + c + "[white:-]"
+				c = "[::r]>" + c + "<[::-]"
 			}
 		}
-		if i > 0 {
-			sb.WriteString("  ")
-		}
-		sb.WriteString(c)
+		chips = append(chips, c)
 	}
-	return sb.String()
+	return chips
 }
 
+func (a *tuiApp) barTextLocked(width int) string {
+	if width <= 0 {
+		width = 80
+	}
+	chips := a.barChips()
+	full := strings.Join(chips, "  ")
+	if barWidth(full) <= width {
+		return full
+	}
+	// Drop whole chips from the end until the overflow marker fits.
+	for n := len(chips) - 1; n > 1; n-- {
+		marker := fmt.Sprintf("… +%d", len(chips)-n)
+		kept := strings.Join(chips[:n], "  ")
+		if barWidth(kept+"  "+marker) <= width {
+			return kept + "  " + marker
+		}
+	}
+	return chips[0]
+}
+
+// barWidth counts what the terminal actually shows: our chips contain
+// literal "[x]" key caps, which tview's TaggedStringWidth consumes as
+// zero-width tags — so measure literally, discounting only the real tags
+// we emit ([::r], [::-], [-]).
+func barWidth(s string) int {
+	for _, tag := range []string{"[::r]", "[::-]", "[-]"} {
+		s = strings.ReplaceAll(s, tag, "")
+	}
+	return len([]rune(s))
+}
 
 // mainLayout builds the stable root once: header + body + bar + footer.
 // Body direction comes from the width class; the log pane always takes the
@@ -454,6 +653,38 @@ func (a *tuiApp) mainLayout(width int) *tview.Flex {
 		AddItem(a.bar, 3, 0, false).
 		AddItem(a.footer, 1, 0, false)
 	return root
+}
+
+func (a *tuiApp) applyFocusLocked() {
+	// Focus differs by border STYLE (double vs single, drawn by tview from
+	// pane focus) AND by color AND by the ► marker in the title — so it
+	// survives light palettes, collapsed colors, and NO_COLOR alike.
+	focused := tcell.AttrBold
+	if tuiNoColor() {
+		focused = tcell.AttrNone
+	}
+	if a.st.pane == tuiPaneActions {
+		a.status.Focus(nil)
+		a.logs.Blur()
+		a.status.SetBorderAttributes(focused)
+		a.logs.SetBorderAttributes(tcell.AttrNone)
+		a.status.SetBorderColor(tcell.ColorDefault)
+		a.logs.SetBorderColor(tcell.ColorDefault)
+		a.status.SetTitle(" \u25ba " + tuiTr("TuiStatus", a.t, "Status") + " ")
+		a.logs.SetTitle(" " + tuiTr("TuiLogs", a.t, "Logs") + " ")
+		a.bar.SetTitle(" \u25ba " + tuiTr("TuiActions", a.t, "Actions") + " ")
+	} else {
+		a.status.Blur()
+		a.logs.Focus(nil)
+		a.status.SetBorderAttributes(tcell.AttrNone)
+		a.logs.SetBorderAttributes(focused)
+		a.status.SetBorderColor(tcell.ColorDefault)
+		a.logs.SetBorderColor(tcell.ColorDefault)
+		a.status.SetTitle(" " + tuiTr("TuiStatus", a.t, "Status") + " ")
+		a.logs.SetTitle(" \u25ba " + tuiTr("TuiLogs", a.t, "Logs") + " ")
+	}
+	a.status.SetBorder(true)
+	a.logs.SetBorder(true)
 }
 
 // applyBodyClass switches stacked/two-column ONLY on class flips and keeps
@@ -488,23 +719,6 @@ func (a *tuiApp) applyFocus() {
 	defer a.mu.Unlock()
 	a.applyFocusLocked()
 }
-
-func (a *tuiApp) applyFocusLocked() {
-	if a.st.pane == tuiPaneActions {
-		a.status.SetBorderColor(tcell.ColorYellow)
-		a.logs.SetBorderColor(tcell.ColorWhite)
-		a.status.SetTitle(" \u25ba " + tuiTr("TuiStatus", a.t, "Status") + " ")
-		a.logs.SetTitle(" " + tuiTr("TuiLogs", a.t, "Logs") + " ")
-		a.bar.SetTitle(" \u25ba " + tuiTr("TuiActions", a.t, "Actions") + " ")
-	} else {
-		a.status.SetBorderColor(tcell.ColorWhite)
-		a.logs.SetBorderColor(tcell.ColorYellow)
-		a.status.SetTitle(" " + tuiTr("TuiStatus", a.t, "Status") + " ")
-		a.logs.SetTitle(" \u25ba " + tuiTr("TuiLogs", a.t, "Logs") + " ")
-		a.bar.SetTitle(" " + tuiTr("TuiActions", a.t, "Actions") + " ")
-	}
-}
-
 
 // runTuiApp is the tview event loop: tcell decodes all input, redraws happen
 // on every key AND a 1s tick, action results show immediately. The tree is
