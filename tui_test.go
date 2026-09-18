@@ -47,6 +47,20 @@ func tuiTestApp() *tuiApp {
 	return a
 }
 
+// TestConstructorRegistersRoot gates the blank-console class: tview draws
+// nothing unless SetRoot ran (draw returns early on root == nil). SetRoot
+// delegates focus into the pages primitive, so assert focus is non-nil and
+// the main page is registered.
+func TestConstructorRegistersRoot(t *testing.T) {
+	a := newTuiApp()
+	if f := a.app.GetFocus(); f == nil {
+		t.Fatal("newTuiApp left app focus nil: SetRoot never ran, first paint would be blank")
+	}
+	if !a.pages.HasPage("main") {
+		t.Fatal("newTuiApp did not register the main page: first paint would be blank")
+	}
+}
+
 // simText renders the live app root on a simulation screen at w,h and reads
 // cells back. Same renderer + same root as the owner runs.
 func simText(t *testing.T, a *tuiApp, w, h int) string {
@@ -452,7 +466,8 @@ func TestRealLoopRespondsAndStops(t *testing.T) {
 	sim.Init()
 	sim.SetSize(80, 24)
 	a.app.SetScreen(sim)
-	a.app.SetRoot(a.pages, true)
+	// No SetRoot here by design: the harness must draw through whatever
+	// newTuiApp registered, so a constructor regression goes blank here too.
 	done := make(chan error, 1)
 	go func() { done <- a.app.Run() }()
 	time.Sleep(300 * time.Millisecond)
@@ -657,7 +672,7 @@ func TestCtrlCStopsRealLoop(t *testing.T) {
 	sim.Init()
 	sim.SetSize(80, 24)
 	a.app.SetScreen(sim)
-	a.app.SetRoot(a.pages, true)
+	// No SetRoot here by design: rely on the constructor (see TestConstructorRegistersRoot).
 	done := make(chan error, 1)
 	go func() { done <- a.app.Run() }()
 	time.Sleep(300 * time.Millisecond)
@@ -681,7 +696,7 @@ func TestCtrlCExitsWithModalOpen(t *testing.T) {
 	sim.Init()
 	sim.SetSize(80, 24)
 	a.app.SetScreen(sim)
-	a.app.SetRoot(a.pages, true)
+	// No SetRoot here by design: rely on the constructor (see TestConstructorRegistersRoot).
 	done := make(chan error, 1)
 	go func() { done <- a.app.Run() }()
 	time.Sleep(300 * time.Millisecond)

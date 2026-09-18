@@ -150,6 +150,10 @@ func newTuiApp() *tuiApp {
 	a.body = tview.NewFlex()
 	a.pages = tview.NewPages()
 	a.pages.AddPage("main", a.mainLayout(80), true, true)
+	// The Application holds its own root pointer: without SetRoot every
+	// draw() returns early (root == nil) and Show() paints only the
+	// cleared screen. Set once here so all paths (prod, sim, tests) draw.
+	a.app.SetRoot(a.pages, true)
 	a.wide = false
 	return a
 }
@@ -521,8 +525,7 @@ func runTuiApp() {
 	tuiDiagConsoleState("after-own-setup")
 	tuiDiagLog("newTuiApp start")
 	a := newTuiApp()
-	a.app.SetRoot(a.pages, true)
-	tuiDiagLog("newTuiApp done (SetRoot installed)")
+	tuiDiagLog("newTuiApp done (root set at construction)")
 	a.refresh()
 	tuiDiagLog("refresh done")
 	a.applyFocus()
@@ -549,12 +552,15 @@ func runTuiApp() {
 			a.mu.Unlock()
 			a.applyBodyClass(w)
 		}
-		tuiDiagLog("afterDraw #%d exit", n)
-		if n == 1 {
+	tuiDiagLog("afterDraw #%d exit", n)
+	if n == 1 {
+		go func() {
+			time.Sleep(300 * time.Millisecond)
 			tuiDiagLog("first-draw cells row0=%s title=%s border=%s",
 				tuiDiagReadCells(0, 0, 20), tuiDiagReadCells(2, 0, 30), tuiDiagReadCells(0, 3, 20))
 			tuiDiagConsoleState("after-first-draw")
-		}
+		}()
+	}
 	})
 	tick := time.NewTicker(1 * time.Second)
 	defer tick.Stop()

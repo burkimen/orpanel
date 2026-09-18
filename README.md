@@ -105,6 +105,9 @@ Requires Go 1.23+.
 Runtime artifact stays a single binary. TUI modules: `github.com/rivo/tview v0.42.0`
 (`github.com/gdamore/tcell/v2 v2.8.1` indirect) for the full-screen console UI.
 
+## Troubleshooting the TUI
+
+If the console UI is blank or unresponsive, set `ORPANEL_TUI_DIAG=1` before starting `orpanel` — it appends stage lines to `%TEMP%\orpanel-tui-diag.log`. `ORPANEL_TUI_NO_RAW=1` additionally skips our pre-init console setup. With both unset nothing is logged and no file is created.
 ## Architecture
 
 ```

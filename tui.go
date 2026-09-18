@@ -228,6 +228,9 @@ func tuiSeedLogs() {
 
 // simFrame renders the app root at w,h on a simulation screen and reads the
 // cell grid back to text. Size comes from the sim screen, never the console.
+// NOTE: it draws a.pages directly, bypassing the Application — so frame
+// dumps are structurally blind to SetRoot/afterDraw/input-capture wiring,
+// and any change to that wiring needs an Application-level test alongside.
 // It draws the root primitive directly: app.Draw/app.SetScreen queue on the
 // event loop, which does not run in the harness — SetScreen a second time
 // blocks forever on screenReplacement, so it must never be called here.

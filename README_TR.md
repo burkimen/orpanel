@@ -102,6 +102,10 @@ go build -ldflags "-X main.AppVersion=dev" -o orPanel.exe  # Windows
 
 Go 1.23+ gerektirir.
 
+## TUI Sorun Giderme
+
+Konsol arayüzü boşsa ya da yanıt vermiyorsa, `orpanel` başlatmadan önce `ORPANEL_TUI_DIAG=1` ayarlayın — aşama satırları `%TEMP%\orpanel-tui-diag.log` dosyasına eklenir. `ORPANEL_TUI_NO_RAW=1` ayrıca açılış öncesi konsol ayarımızı atlar. İkisi de ayarlı değilken hiçbir kayıt tutulmaz ve dosya oluşmaz.
+
 ## Mimari
 
 ```
