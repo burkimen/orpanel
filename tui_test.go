@@ -655,3 +655,92 @@ func TestKeyHandlingNonBlockingDuringSlowProbe(t *testing.T) {
 		t.Fatalf("sel=%d want 1", a.stateSnapshot().sel)
 	}
 }
+
+func TestCtrlCStopsRealLoop(t *testing.T) {
+	a := tuiTestApp()
+	a.setupInputCapture()
+	a.refresh()
+	a.applyFocus()
+	sim := tcell.NewSimulationScreen("UTF-8")
+	sim.Init()
+	sim.SetSize(80, 24)
+	a.app.SetScreen(sim)
+	a.app.SetRoot(a.pages, true)
+	done := make(chan error, 1)
+	go func() { done <- a.app.Run() }()
+	time.Sleep(300 * time.Millisecond)
+	sim.InjectKey(tcell.KeyCtrlC, 0, tcell.ModNone)
+	select {
+	case err := <-done:
+		_ = err
+	case <-time.After(5 * time.Second):
+		a.app.Stop()
+		<-done
+		t.Fatalf("Ctrl+C did not stop the app within 5s")
+	}
+}
+
+func TestCtrlCExitsWithModalOpen(t *testing.T) {
+	a := tuiTestApp()
+	a.setupInputCapture()
+	a.refresh()
+	a.applyFocus()
+	sim := tcell.NewSimulationScreen("UTF-8")
+	sim.Init()
+	sim.SetSize(80, 24)
+	a.app.SetScreen(sim)
+	a.app.SetRoot(a.pages, true)
+	done := make(chan error, 1)
+	go func() { done <- a.app.Run() }()
+	time.Sleep(300 * time.Millisecond)
+	sim.InjectKey(tcell.KeyRune, '?', tcell.ModNone)
+	time.Sleep(500 * time.Millisecond)
+	if front, _ := a.pages.GetFrontPage(); front != "modal" {
+		a.app.Stop()
+		<-done
+		t.Fatalf("help modal did not open")
+	}
+	sim.InjectKey(tcell.KeyCtrlC, 0, tcell.ModNone)
+	select {
+	case err := <-done:
+		_ = err
+	case <-time.After(5 * time.Second):
+		a.app.Stop()
+		<-done
+		t.Fatalf("Ctrl+C with modal open did not stop the app within 5s")
+	}
+}
+
+func TestLanguagePressRelocalizes(t *testing.T) {
+	a := tuiTestApp()
+	a.t = loadTranslations("en")
+	a.st = tuiState{pane: tuiPaneActions, rows: tuiActionRows(a.t)}
+	// Pin the starting language: the dispatch cycles from the SAVED config,
+	// so force it to en first (config file may say anything on this box).
+	saveConfig("en", loadConfig().AutoStart)
+	a.t = loadTranslations("en")
+	a.st = tuiState{pane: tuiPaneActions, rows: tuiActionRows(a.t)}
+	before := simText(t, a, 80, 24)
+	if !strings.Contains(before, "Start") {
+		t.Fatalf("english frame missing Start:\n%s", before)
+	}
+	a.handleKeyEvent(tcell.NewEventKey(tcell.KeyRune, 'l', tcell.ModNone))
+	after := simText(t, a, 80, 24)
+	if !strings.Contains(after, "lat") {
+		t.Fatalf("after l (en->tr), frame not Turkish:\n%s", after)
+	}
+	a.handleKeyEvent(tcell.NewEventKey(tcell.KeyRune, 'l', tcell.ModNone))
+	third := simText(t, a, 80, 24)
+	if third == after {
+		t.Fatalf("second l did not cycle language again")
+	}
+}
+
+func TestThemePressIsExplicit(t *testing.T) {
+	a := tuiTestApp()
+	a.handleKeyEvent(tcell.NewEventKey(tcell.KeyRune, 't', tcell.ModNone))
+	msg := a.msgSnapshot()
+	if msg == "" || msg == "dark" || msg == "light" || msg == "system" {
+		t.Fatalf("theme press returned bare token %q (must explain TUI palette)", msg)
+	}
+}

@@ -183,6 +183,8 @@ func tuiSimKey(name string) (tcell.Key, rune) {
 		return tcell.KeyEnd, 0
 	case "q", "quit":
 		return tcell.KeyRune, 'q'
+	case "ctrlc", "ctrl-c", "sigint":
+		return tcell.KeyCtrlC, 0
 	case "?":
 		return tcell.KeyRune, '?'
 	default:
@@ -268,9 +270,13 @@ func simInject(a *tuiApp, sim tcell.SimulationScreen, name string) {
 	}
 	ev := tcell.NewEventKey(key, r, tcell.ModNone)
 	if front, _ := a.pages.GetFrontPage(); front == "modal" {
-		// Same gate as the live loop: modal keys reach the modal's own
-		// input handler (Esc fires its cancel func); anything else is
-		// swallowed so no global shortcut fires behind the dialog.
+		// Same gate as the live loop, including the Ctrl+C escape hatch:
+		// modal keys reach the modal's own input handler; anything else
+		// is swallowed so no global shortcut fires behind the dialog.
+		if ev.Key() == tcell.KeyCtrlC {
+			a.app.Stop()
+			return
+		}
 		switch ev.Key() {
 		case tcell.KeyEnter, tcell.KeyTab, tcell.KeyBacktab:
 			if h := a.modalInputHandler(); h != nil {
@@ -292,6 +298,10 @@ func simInject(a *tuiApp, sim tcell.SimulationScreen, name string) {
 		default:
 			return
 		}
+	}
+	if ev.Key() == tcell.KeyCtrlC {
+		a.app.Stop()
+		return
 	}
 	a.handleKeyEvent(ev)
 	_ = sim
@@ -542,7 +552,10 @@ func tuiDoAction(act int, t map[string]string) string {
 			next = ThemeLight
 		}
 		_ = saveTheme(next)
-		return next
+		// Honest outcome (b): the TUI keeps the terminal palette
+		// (NO_COLOR overrides everything); the theme applies to the web
+		// UI. Say so instead of showing a token that changed nothing.
+		return tr("TuiThemeMsg", "web UI theme") + ": " + next + " (" + tr("TuiThemeNote", "TUI uses the terminal palette") + ")"
 	case tuiActWebUI:
 		openBrowser("http://localhost:20127")
 		return tr("TuiOpenedBrowser", "Opened")

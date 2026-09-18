@@ -255,10 +255,6 @@ func (a *tuiApp) showModal(title, body, hint string, buttons []string, onOK func
 func (a *tuiApp) showHelp() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.showHelpLocked()
-}
-
-func (a *tuiApp) showHelpLocked() {
 	a.st.showHelp = true
 	a.showModal(tuiTr("TuiHelpTitle", a.t, "Keys"), a.helpBody(), "Esc "+tuiTr("TuiClose", a.t, "Close"), []string{tuiTr("TuiClose", a.t, "Close")}, nil, func() {
 		a.mu.Lock()
@@ -266,6 +262,7 @@ func (a *tuiApp) showHelpLocked() {
 		a.st.showHelp = false
 	})
 }
+
 
 func (a *tuiApp) confirmAction(act int) {
 	b, _ := tuiBindingByAct(act)
@@ -599,6 +596,12 @@ func runTuiApp() {
 // loop; it must never block on Draw — returning nil draws via a.draw()).
 func (a *tuiApp) setupInputCapture() {
 	a.app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+		// Ctrl+C is the escape hatch: forward unchanged so tview's own
+		// branch stops the app (deferred tcell Fini + code-page restore
+		// run). Never swallow it — not even with a modal up.
+		if ev.Key() == tcell.KeyCtrlC {
+			return ev
+		}
 		// Modal up: Enter/Esc/Tab belong to tview.Modal (buttons/focus);
 		// swallow every other key so no global shortcut fires behind it.
 		if name, _ := a.pages.GetFrontPage(); name == "modal" {
@@ -610,12 +613,34 @@ func (a *tuiApp) setupInputCapture() {
 			}
 		}
 		out := a.handleKeyEvent(ev)
-		if a.st.quit {
+		a.mu.Lock()
+		quit := a.st.quit
+		a.mu.Unlock()
+		if quit {
 			a.app.Stop()
 			return nil
 		}
 		return out
 	})
+}
+
+// applyLanguageLocked reloads the translation map + action rows after `l`
+// so titles, chips, footer and help switch language immediately (no restart).
+// Caller holds a.mu.
+func (a *tuiApp) applyLanguageLocked(next string) {
+	a.t = loadTranslations(next)
+	a.st.rows = tuiActionRows(a.t)
+	if a.st.sel >= len(a.st.rows) {
+		a.st.sel = len(a.st.rows) - 1
+	}
+	if a.st.sel < 0 {
+		a.st.sel = 0
+	}
+	a.status.SetTitle(" " + tuiTr("TuiStatus", a.t, "Status") + " ")
+	a.logs.SetTitle(" " + tuiTr("TuiLogs", a.t, "Logs") + " ")
+	a.bar.SetTitle(" " + tuiTr("TuiActions", a.t, "Actions") + " ")
+	a.refreshLocked()
+	a.applyFocusLocked()
 }
 // modalInputHandler returns the open modal's input handler, or nil.
 func (a *tuiApp) modalInputHandler() func(*tcell.EventKey, func(tview.Primitive)) {
@@ -643,7 +668,12 @@ func (a *tuiApp) handleKeyEvent(ev *tcell.EventKey) *tcell.EventKey {
 	}
 	if k.r == '?' {
 		if a.st.showHelp {
-			a.showHelpLocked()
+			a.st.showHelp = true
+			a.showModal(tuiTr("TuiHelpTitle", a.t, "Keys"), a.helpBody(), "Esc "+tuiTr("TuiClose", a.t, "Close"), []string{tuiTr("TuiClose", a.t, "Close")}, nil, func() {
+				a.mu.Lock()
+				defer a.mu.Unlock()
+				a.st.showHelp = false
+			})
 		} else {
 			a.pages.RemovePage("modal")
 		}
@@ -676,6 +706,12 @@ func (a *tuiApp) handleKeyEvent(ev *tcell.EventKey) *tcell.EventKey {
 		msg := tuiDoAction(act, a.t)
 		a.mu.Lock()
 		a.setMsgLocked(msg)
+		// Language switch takes effect immediately: reload map + rows.
+		if act == tuiActLanguage {
+			if cfg := loadConfig(); cfg.Language != "" {
+				a.applyLanguageLocked(cfg.Language)
+			}
+		}
 	} else {
 		a.st.lastAct = tuiActNone
 	}

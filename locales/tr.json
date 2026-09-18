@@ -177,5 +177,7 @@
   "TuiConfirmLegend": "* onay ister",
   "TuiManagedPanel": "yönetim: panel (:20127)",
   "TuiManagedLocal": "yönetim: bu süreç",
-  "TuiOpFailed": "İşlem başarısız"
+  "TuiOpFailed": "İşlem başarısız",
+  "TuiThemeMsg": "web arayüzü teması",
+  "TuiThemeNote": "TUI terminal paletini kullanır"
 }

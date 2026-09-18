@@ -177,5 +177,7 @@
   "TuiConfirmLegend": "* needs confirm",
   "TuiManagedPanel": "managed by panel (:20127)",
   "TuiManagedLocal": "managed by this process",
-  "TuiOpFailed": "Operation failed"
+  "TuiOpFailed": "Operation failed",
+  "TuiThemeMsg": "web UI theme",
+  "TuiThemeNote": "TUI uses the terminal palette"
 }
