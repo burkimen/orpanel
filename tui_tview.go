@@ -309,7 +309,10 @@ func (a *tuiApp) showModal(title, body, hint string, buttons []string, onOK func
 	w, h := a.modalFitSize()
 	if w > 0 {
 		body = fitModalWidth(body, w-2)
-		hint = fitModalHint(hint, modalInnerWidth(body))
+		// Hint stays on ONE row: it names the safe default (Esc) and
+		// must never wrap it onto a clipped second line. Width fit
+		// only guards overflow; the modal centers short hints.
+		hint = fitModalHint(hint, w-2)
 	}
 	if h > 0 {
 		body = fitModalBody(body, hint, len(buttons), h)
@@ -472,7 +475,10 @@ func (a *tuiApp) confirmAction(act int) {
 		})
 		return
 	}
-	a.showModal(tuiTr("TuiConfirmTitle", a.t, "Confirm"), body, tuiTr("TuiConfirmHint", a.t, "Enter confirm · Esc cancel"), []string{tuiTr("TuiConfirmOK", a.t, "confirm"), tuiTr("TuiConfirmCancel", a.t, "cancel")}, func() {
+	// Hint lives INSIDE the body text (not tview's button row): the button
+	// row clips to the longest button, but body text always renders full.
+	body += "\n" + tuiTr("TuiConfirmHint", a.t, "Enter confirm · Esc cancel")
+	a.showModal(tuiTr("TuiConfirmTitle", a.t, "Confirm"), body, "", []string{tuiTr("TuiConfirmOK", a.t, "confirm"), tuiTr("TuiConfirmCancel", a.t, "cancel")}, func() {
 		msg := tuiDoAction(act, a.t)
 		a.setMsg(msg)
 	}, func() {
@@ -1315,6 +1321,12 @@ func (a *tuiApp) handleKeyEvent(ev *tcell.EventKey) *tcell.EventKey {
 	// running/stopped (snapshot), and theme/language change the labels.
 	a.syncListsLocked(a.snap)
 	a.refreshLocked()
+	// refreshLocked rebuilds rows but never swaps the shown List: each
+	// section owns a DIFFERENT List (no header rows by design), so a
+	// section change must re-parent the visible one here. simFrame's
+	// refresh does the same via this path (section keys flow through
+	// handleKeyEvent), keeping dumps and live converged.
+	a.syncActionPaneLocked()
 	a.applyFocusLocked()
 	return nil
 }

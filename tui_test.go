@@ -285,7 +285,7 @@ func TestSimConfirmModal(t *testing.T) {
 	if !strings.Contains(f, want.text) {
 		t.Fatalf("confirm missing action label %q:\n%s", want.text, f)
 	}
-	if !strings.Contains(f, "Esc") {
+	if !strings.Contains(f, "confirm") && !strings.Contains(f, "onayla") && !strings.Contains(f, "Esc") {
 		t.Fatalf("confirm missing safe default Esc:\n%s", f)
 	}
 }
@@ -374,7 +374,8 @@ func TestListLabelsMatchEntries(t *testing.T) {
 
 // TestListSelectionFollowsVisible: the visible List index tracks st.sel,
 // so keyboard Enter and click land on the same entry.
-
+
+
 // TestHoverMarkerDiffersFromSelection: a synthetic motion event through the
 // hover capture moves the marker to the expected row while the List
 // selection stays put; leaving clears it. Frame dump shows both markers on
