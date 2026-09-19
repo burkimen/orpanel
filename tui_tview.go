@@ -1110,7 +1110,13 @@ func runTuiApp() {
 	// Mouse comes from the library: one call requests the terminal mouse
 	// protocol; List/TextView/Modal handlers do the rest (§3). OUR hover
 	// is separate (SetMouseCapture below): motion → › marker repaint.
-	a.app.EnableMouse(true)
+	// ORPANEL_TUI_NO_MOUSE=1 skips EnableMouse (bisect hatch: mouse makes
+	// tcell take the VT-input path; keyboard stays complete without it).
+	if os.Getenv("ORPANEL_TUI_NO_MOUSE") == "1" {
+		tuiDiagLog("NO_MOUSE hatch: skipping EnableMouse")
+	} else {
+		a.app.EnableMouse(true)
+	}
 	a.setupMouseCapture()
 	tuiDiagLog("newTuiApp done (root set at construction)")
 	a.refresh()
