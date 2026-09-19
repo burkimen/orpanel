@@ -47,24 +47,26 @@ const (
 	tuiNavQuit
 )
 
-// tuiKeymap is ordered for the action bar left to right, then navigation.
+// tuiKeymap is ordered actions first (state actions + sections), then the
+// visible navigation vocabulary: arrows + Tab + Enter + Esc + ? + q.
+// j/k/g/G are GONE (owner decision) — no hidden aliases anywhere.
 var tuiKeymap = []tuiBinding{
 	{act: tuiActStart, key: 's', label: "TuiStart", scope: tuiScopeAction, confirm: false},
 	{act: tuiActStop, key: 'x', label: "TuiStop", scope: tuiScopeAction, confirm: true},
 	{act: tuiActRestart, key: 'r', label: "TuiRestart", scope: tuiScopeAction, confirm: true},
 	{act: tuiActUpdate, key: 'u', label: "TuiUpdate", scope: tuiScopeAction, confirm: true},
 	{act: tuiActRepair, key: 'R', label: "TuiRepair", scope: tuiScopeAction, confirm: true},
-	{act: tuiActInstall, key: 'i', label: "TuiInstall", scope: tuiScopeAction, confirm: false},
+	{act: tuiActInstall, key: 'i', label: "TuiInstall", scope: tuiScopeAction, confirm: true},
 	{act: tuiActAutostart, key: 'a', label: "TuiAutostart", scope: tuiScopeAction, confirm: false},
 	{act: tuiActLanguage, key: 'l', label: "TuiLanguage", scope: tuiScopeAction, confirm: false},
 	{act: tuiActTheme, key: 't', label: "TuiTheme", scope: tuiScopeAction, confirm: false},
 	{act: tuiActWebUI, key: 'w', label: "TuiWebUI", scope: tuiScopeAction, confirm: false},
-	{act: tuiNavSelect, key: 'j', keyName: "↑↓/j/k", label: "TuiNavSelect", hint: "TuiHintSelect", scope: tuiScopePane, panes: []int{tuiPaneActions}},
+	{act: tuiNavSelect, keyName: "↑↓", label: "TuiNavSelect", hint: "TuiHintSelect", scope: tuiScopePane, panes: []int{tuiPaneActions}},
 	{act: tuiNavPane, key: '\t', keyName: "Tab", label: "TuiNavPane", hint: "TuiHintPane", scope: tuiScopeGlobal},
 	{act: tuiNavActivate, key: '\r', keyName: "Enter", label: "TuiNavActivate", hint: "TuiHintActivate", scope: tuiScopePane, panes: []int{tuiPaneActions}},
 	{act: tuiNavCancel, key: 0x1b, keyName: "Esc", label: "TuiNavCancel", hint: "TuiHintCancel", scope: tuiScopeGlobal},
-	{act: tuiNavScroll, key: 'k', keyName: "PgUp/PgDn", label: "TuiNavScroll", hint: "TuiHintScroll", scope: tuiScopePane, panes: []int{tuiPaneLogs}},
-	{act: tuiNavEdges, key: 'g', keyName: "g/G", label: "TuiNavEdges", hint: "TuiHintEdges", scope: tuiScopePane, panes: []int{tuiPaneLogs}},
+	{act: tuiNavScroll, keyName: "PgUp/PgDn", label: "TuiNavScroll", hint: "TuiHintScroll", scope: tuiScopePane, panes: []int{tuiPaneLogs}},
+	{act: tuiNavEdges, keyName: "Home/End", label: "TuiNavEdges", hint: "TuiHintEdges", scope: tuiScopePane, panes: []int{tuiPaneLogs}},
 	{act: tuiNavHelp, key: '?', label: "TuiHelp", hint: "TuiHintHelp", scope: tuiScopeGlobal},
 	{act: tuiNavQuit, key: 'q', label: "TuiClose", hint: "TuiHintQuit", scope: tuiScopeGlobal},
 }

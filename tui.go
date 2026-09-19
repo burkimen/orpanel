@@ -159,13 +159,13 @@ func tuiScriptKeys() []string {
 // It flows through the real SetInputCapture closure, not around it.
 func tuiSimKey(name string) (tcell.Key, rune) {
 	switch name {
-	case "down", "j":
+	case "down":
 		return tcell.KeyDown, 0
-	case "up", "k":
+	case "up":
 		return tcell.KeyUp, 0
-	case "left", "h":
+	case "left":
 		return tcell.KeyLeft, 0
-	case "right", "l":
+	case "right":
 		return tcell.KeyRight, 0
 	case "enter":
 		return tcell.KeyEnter, 0
