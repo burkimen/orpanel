@@ -1221,7 +1221,15 @@ func (a *tuiApp) setupInputCapture() {
 		}
 		// Modal up: Enter/Esc/Tab belong to tview.Modal (buttons/focus);
 		// swallow every other key so no global shortcut fires behind it.
-		if name, _ := a.pages.GetFrontPage(); name == "modal" {
+		// Pages is NOT goroutine-safe (AddPage vs GetFrontPage race in
+		// CI): hold a.mu across the check so event-loop Pages writes
+		// (AddPage/RemovePage/ShowPage in showModal/closeModalSync) and
+		// this read never overlap. a.mu already guards all Pages
+		// mutation; GetFrontPage here joins the same lock.
+		a.mu.Lock()
+		name, _ := a.pages.GetFrontPage()
+		a.mu.Unlock()
+		if name == "modal" {
 			switch ev.Key() {
 			case tcell.KeyEnter, tcell.KeyEscape, tcell.KeyTab, tcell.KeyBacktab:
 				return ev

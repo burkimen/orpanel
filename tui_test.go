@@ -1088,7 +1088,13 @@ func TestCtrlCExitsWithModalOpen(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	sim.InjectKey(tcell.KeyRune, '?', tcell.ModNone)
 	time.Sleep(500 * time.Millisecond)
-	if front, _ := a.pages.GetFrontPage(); front != "modal" {
+	// Pages is NOT goroutine-safe: the event loop owns AddPage while this
+	// goroutine reads. Join a.mu (the same lock all Pages mutation takes)
+	// so -race never sees GetFrontPage vs AddPage overlap.
+	a.mu.Lock()
+	front, _ := a.pages.GetFrontPage()
+	a.mu.Unlock()
+	if front != "modal" {
 		a.app.Stop()
 		<-done
 		t.Fatalf("help modal did not open")
