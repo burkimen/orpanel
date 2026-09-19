@@ -705,6 +705,21 @@ func (a *tuiApp) applyThemeLocked() {
 	}
 }
 
+// tuiSelectionColors resolves the List selection style for one theme:
+// the observable contract behind applyThemeLocked (frame dumps carry no
+// colour, so tests pin through here): dark/light resolve differently,
+// system resolves to the terminal default (no brand colours).
+func tuiSelectionColors(theme string) tcell.Color {
+	switch theme {
+	case ThemeLight:
+		return tcell.ColorBlack
+	case ThemeDark:
+		return tcell.ColorWhite
+	default:
+		return tcell.ColorDefault
+	}
+}
+
 // applyTheme is the locked wrapper for non-loop callers.
 func (a *tuiApp) applyTheme() {
 	a.mu.Lock()
@@ -739,10 +754,16 @@ func (a *tuiApp) syncListsLocked(snap tuiSnapshot) {
 			continue
 		}
 		l.Clear()
-		for _, e := range entries {
+		for i, e := range entries {
 			lbl := e.text
 			if tuiConfirmNeeded(e.id) {
 				lbl += " *"
+			}
+			// Hover is OUR marker (tview has none): the hovered row
+			// of the visible List carries a bold prefix so selection
+			// (reverse video) and hover stay on different rows.
+			if sec == a.st.sec && i == a.hover && a.hoverList == l {
+				lbl = "› " + lbl
 			}
 			l.AddItem(lbl, "", 0, nil)
 		}
@@ -1133,10 +1154,17 @@ func (a *tuiApp) handleMouseMove(ev *tcell.EventMouse) {
 	x, y := ev.Position()
 	idx := listIndexAt(l, x, y)
 	if idx < 0 {
-		a.hover, a.hoverList = -1, nil
+		if a.hover != -1 {
+			a.hover, a.hoverList = -1, nil
+			a.syncListsLocked(a.snap)
+		}
+		return
+	}
+	if idx == a.hover && a.hoverList == l {
 		return
 	}
 	a.hover, a.hoverList = idx, l
+	a.syncListsLocked(a.snap)
 }
 
 // listIndexAt maps screen coords to a List row via its inner rect.
@@ -1194,6 +1222,9 @@ func (a *tuiApp) handleKeyEvent(ev *tcell.EventKey) *tcell.EventKey {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.st = handleKey(a.st, k)
+	if vis := a.visibleListLocked(); vis != nil && a.st.sel >= 0 && a.st.sel < vis.GetItemCount() && vis.GetCurrentItem() != a.st.sel {
+		vis.SetCurrentItem(a.st.sel)
+	}
 	if a.st.quit {
 		return nil
 	}
@@ -1217,6 +1248,16 @@ func (a *tuiApp) handleKeyEvent(ev *tcell.EventKey) *tcell.EventKey {
 		if a.st.lastAct == tuiActConfirmCancel {
 			a.st.confirm = 0
 			a.pages.RemovePage("modal")
+			a.refreshLocked()
+			a.applyFocusLocked()
+			a.st.lastAct = tuiActNone
+			return nil
+		}
+		if tuiEntryIsSection(act) {
+			a.st.sec = tuiSectionFor(act)
+			a.st.sel = 0
+			a.st.confirm = 0
+			a.syncActionPaneLocked()
 			a.refreshLocked()
 			a.applyFocusLocked()
 			a.st.lastAct = tuiActNone

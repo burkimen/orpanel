@@ -202,8 +202,10 @@ func handleKey(st tuiState, k tuiKey) tuiState {
 		}
 		st.lastAct = tuiActPaneNext
 		return st
-	case k.esc:
+	case k.esc && k.raw != "[A" && k.raw != "OA" && k.raw != "[B" && k.raw != "OB" && k.raw != "[5~" && k.raw != "[6~" && k.raw != "[H" && k.raw != "[1~" && k.raw != "[F" && k.raw != "[4~":
 		// Esc in a sub-list backs out to top; on top it closes help.
+		// (Arrow/paging raws excluded: they carry esc=true and are
+		// handled by the pane branches below.)
 		if st.sec != tuiSecTop {
 			st.sec = tuiSecTop
 			st.sel = 0

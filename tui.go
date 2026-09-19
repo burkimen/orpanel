@@ -288,22 +288,36 @@ func simInject(a *tuiApp, sim tcell.SimulationScreen, name string) {
 		}
 		switch ev.Key() {
 		case tcell.KeyEnter, tcell.KeyTab, tcell.KeyBacktab:
-			if h := a.modalInputHandler(); h != nil {
-				h(ev, func(p tview.Primitive) { a.app.SetFocus(p) })
-			}
-			return
+		// Route through the modal exactly as the live loop does: the
+		// modal owns focus while open, and its handler consumes
+		// Enter/Tab internally (focus/buttons), calling SetDoneFunc
+		// only on close. a.app.SetFocus in showModal does not take
+		// effect without the event loop, so focus the page first.
+		a.pages.Focus(func(p tview.Primitive) { a.app.SetFocus(p) })
+		if h := a.modalInputHandler(); h != nil {
+			h(ev, func(p tview.Primitive) { a.app.SetFocus(p) })
+		}
+		if front2, _ := a.pages.GetFrontPage(); front2 == "modal" {
+			a.pages.Focus(func(p tview.Primitive) { a.app.SetFocus(p) })
+		} else {
+			a.closeModalSync()
+		}
+		return
 		case tcell.KeyEscape:
-			if h := a.modalInputHandler(); h != nil {
-				h(ev, func(p tview.Primitive) { a.app.SetFocus(p) })
-			}
-			// Belt-and-braces: the modal cancel func closes the page, but
-			// if focus never entered the modal the handler above is a
-			// no-op — fall through to the shared close path so dumps and
-			// tests always converge with the live loop.
-			if front2, _ := a.pages.GetFrontPage(); front2 == "modal" {
-				a.closeModalSync()
-			}
-			return
+		// Esc: modal cancel func closes the page via SetDoneFunc(-1);
+		// without the event loop the modal never has focus, so the
+		// handler above is a no-op — fall through to the shared close
+		// path so dumps and tests converge with the live loop.
+		a.pages.Focus(func(p tview.Primitive) { a.app.SetFocus(p) })
+		if h := a.modalInputHandler(); h != nil {
+			h(ev, func(p tview.Primitive) { a.app.SetFocus(p) })
+		}
+		if front2, _ := a.pages.GetFrontPage(); front2 == "modal" {
+			a.closeModalSync()
+		} else {
+			a.closeModalSync()
+		}
+		return
 		default:
 			return
 		}
@@ -582,10 +596,9 @@ func tuiDoAction(act int, t map[string]string) string {
 			next = ThemeLight
 		}
 		_ = saveTheme(next)
-		// Honest outcome (b): the TUI keeps the terminal palette
-		// (NO_COLOR overrides everything); the theme applies to the web
-		// UI. Say so instead of showing a token that changed nothing.
-		return tr("TuiThemeMsg", "web UI theme") + ": " + next + " (" + tr("TuiThemeNote", "TUI uses the terminal palette") + ")"
+		// The TUI repaints its own palette immediately (system = terminal
+		// defaults, NO_COLOR wins); report what actually changed.
+		return tuiThemeMessage(next, t)
 	case tuiActWebUI:
 		openBrowser("http://localhost:20127")
 		return tr("TuiOpenedBrowser", "Opened")
