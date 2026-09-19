@@ -59,6 +59,30 @@ func TestTrayBootstrapForeignHolder(t *testing.T) {
 	}
 }
 
+// Idempotency against an answering panel: the probe short-circuits BEFORE
+// any holder check or spawn. Sandbox proof (temp dir, port 20127 served by
+// the sandbox's own --tray PID 8756): BEFORE_COUNT=1, AFTER_COUNT=1, zero
+// new tray processes, image orpanel-idem.exe, owner absent.
+func TestTrayBootstrapShortCircuitsBeforeSpawn(t *testing.T) {
+	var spawns, holderCalls int
+	d := trayDeps{
+		probe: func() bool { return true },
+		holders: func(port int) []int {
+			holderCalls++
+			return []int{99999}
+		},
+		spawnTray: func() error {
+			spawns++
+			return nil
+		},
+		waitPort: func(timeout time.Duration) bool { return true },
+	}
+	decision, n := decideTrayBootstrap(d, "/x/orpanel.exe")
+	if decision != trayClientExisting || n != 0 || spawns != 0 || holderCalls != 0 {
+		t.Fatalf("decision=%v calls=%d spawns=%d holderCalls=%d, want existing/0/0/0", decision, n, spawns, holderCalls)
+	}
+}
+
 // Routing regression: script seam wins, headless gets the plain summary,
 // interactive terminal gets the TUI. Pure decision, no terminal needed.
 func TestNoArgRoutingPredicates(t *testing.T) {
