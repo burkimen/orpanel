@@ -99,6 +99,16 @@ type tuiApp struct {
 	lastH     int
 	snap      tuiSnapshot // last rendered snapshot (sim harness reads it)
 	ttooSmall string      // cached too-small text for the sim guard
+	// TUI 2.0: one List per section. The visible List shows exactly the
+	// entries of tuiEntriesFor(sec); Enter/click dispatch entries[i].id.
+	listTop *tview.List
+	listBak *tview.List
+	listAya *tview.List
+	hover   int // hovered row in the visible List, -1 = none (OUR code)
+	hoverList *tview.List // which List the hover belongs to
+	// Client-mode log cursor: last newIndex served by /api/logs.
+	logCursor int
+	logReady  bool // false until the first client poll answers
 }
 // tuiStateSnapshot copies selection-relevant state for race-safe test reads.
 func (a *tuiApp) stateSnapshot() tuiState {
@@ -143,7 +153,7 @@ func headerText(width int, appVer, omniVer, lang, theme, clock string) string {
 }
 
 func newTuiApp() *tuiApp {
-	a := &tuiApp{app: tview.NewApplication(), t: loadTranslations(getCurrentLang()), follow: true}
+	a := &tuiApp{app: tview.NewApplication(), t: loadTranslations(getCurrentLang()), follow: true, hover: -1}
 	a.status = tview.NewTextView().SetDynamicColors(!tuiNoColor()).SetScrollable(false)
 	a.status.SetWrap(false)
 	a.logs = tview.NewTextView().SetDynamicColors(!tuiNoColor()).SetScrollable(true)
@@ -159,8 +169,11 @@ func newTuiApp() *tuiApp {
 	}
 	a.status.SetTitle(" " + tuiTr("TuiStatus", a.t, "Status") + " ")
 	a.logs.SetTitle(" " + tuiTr("TuiLogs", a.t, "Logs") + " ")
-	a.bar.SetTitle(" " + tuiTr("TuiActions", a.t, "Actions") + " ")
+	a.setListTitlesLocked(" " + tuiTr("TuiActions", a.t, "Actions") + " ")
 	a.st = tuiState{pane: tuiPaneActions, rows: tuiActionRows(a.t)}
+	a.listTop = newActionList(a)
+	a.listBak = newActionList(a)
+	a.listAya = newActionList(a)
 	a.body = tview.NewFlex()
 	a.pages = tview.NewPages()
 	a.pages.AddPage("main", a.mainLayout(80), true, true)
@@ -168,8 +181,23 @@ func newTuiApp() *tuiApp {
 	// draw() returns early (root == nil) and Show() paints only the
 	// cleared screen. Set once here so all paths (prod, sim, tests) draw.
 	a.app.SetRoot(a.pages, true)
+	a.applyThemeLocked()
+	a.syncListsLocked(tuiSnapshot{status: "running", updateAvail: true})
 	a.wide = false
 	return a
+}
+
+// newActionList builds one action List: keyboard nav + Enter + click +
+// wheel all come from the List; selection is SetSelectedStyle reverse.
+func newActionList(a *tuiApp) *tview.List {
+	l := tview.NewList().ShowSecondaryText(false)
+	l.SetWrapAround(false)
+	l.SetSelectedStyle(tcell.StyleDefault.Reverse(true))
+	l.SetSelectedFunc(func(index int, _ string, _ string, _ rune) {
+		a.activateListIndex(index)
+	})
+	l.SetBorder(true)
+	return l
 }
 
 // footerText is CONTEXTUAL: hints for the focused pane only, built from the
@@ -481,22 +509,21 @@ func (a *tuiApp) refreshLocked() {
 	snap.status = state
 	clock := time.Now().Format("15:04:05")
 	a.header.SetText(headerText(a.lastW, snap.appVer, snap.omniVer, snap.lang, snap.theme, clock))
+	// Fixed 11-cell label column (§1) with badge + tepsi + yönetim rows.
 	var sb strings.Builder
-	rows := [][2]string{
-		{tuiTr("TuiStatus", a.t, "Status"), state},
-		{tuiTr("HealthLabelVersion", a.t, "Version"), snap.omniVer},
-		{tuiTr("HealthLabelPort", a.t, "Port"), snap.port},
-		{tuiTr("HealthLabelNode", a.t, "Node"), snap.nodeVer},
+	badge := "○"
+	if snap.probe == "healthy" {
+		badge = "●"
 	}
-	w := 8
-	for _, r := range rows {
-		if len([]rune(r[0])) > w {
-			w = len([]rune(r[0]))
-		}
+	fmt.Fprintf(&sb, "%-11s %s %s\n", tuiTr("TuiStatus", a.t, "Status"), badge, state)
+	fmt.Fprintf(&sb, "%-11s %s\n", tuiTr("HealthLabelVersion", a.t, "Version"), snap.omniVer)
+	fmt.Fprintf(&sb, "%-11s %s\n", tuiTr("HealthLabelPort", a.t, "Port"), snap.port)
+	fmt.Fprintf(&sb, "%-11s %s\n", tuiTr("HealthLabelNode", a.t, "Node"), snap.nodeVer)
+	trayOn := tuiTr("TuiOff", a.t, "Off")
+	if isAutoStartEnabled() {
+		trayOn = tuiTr("TuiOn", a.t, "On")
 	}
-	for _, r := range rows {
-		fmt.Fprintf(&sb, "%-*s  %s\n", w, r[0], r[1])
-	}
+	fmt.Fprintf(&sb, "%-11s %s\n", tuiTr("TuiTray", a.t, "Tray"), trayOn)
 	if tuiCachedPanelServing() {
 		fmt.Fprintf(&sb, "%s\n", tuiTr("TuiManagedPanel", a.t, "managed by panel (:20127)"))
 	} else {
@@ -512,15 +539,63 @@ func (a *tuiApp) refreshLocked() {
 		fmt.Fprintf(&sb, "%s\n", snap.opPhase)
 	}
 	a.status.SetText(strings.TrimRight(sb.String(), "\n"))
+	a.syncListsLocked(snap)
+	a.renderLogsLocked(snap)
+	fw := a.lastW
+	if fw <= 0 {
+		fw = 80
+	}
+	foot := a.footerTextLocked(fw - 2)
+	if a.msg != "" {
+		if time.Since(a.msgAt) < 8*time.Second {
+			foot = a.msg
+		} else {
+			a.msg = ""
+		}
+	}
+	a.footer.SetText(foot)
+	a.snap = snap
+}
+// renderLogsLocked paints the log pane. Client mode polls
+// GET /api/logs?last=N incrementally (last = served newIndex); direct mode
+// uses the in-process buffer only. Never an empty box: loading/empty lines.
+func (a *tuiApp) renderLogsLocked(snap tuiSnapshot) {
 	a.logs.Clear()
+	if tuiCachedPanelServing() {
+		title := " " + tuiTr("TuiLogs", a.t, "Logs") + " (panel) "
+		lines, cursor, ok := tuiPollPanelLogs(a.logCursor)
+		if !ok {
+			if !a.logReady {
+				a.logs.SetTitle(title)
+				fmt.Fprintln(a.logs, tuiTr("TuiLogLoading", a.t, "loading…"))
+				return
+			}
+			lines = nil
+		} else {
+			a.logCursor, a.logReady = cursor, true
+		}
+		a.logs.SetTitle(title)
+		if len(lines) == 0 {
+			fmt.Fprintln(a.logs, tuiTr("TuiLogEmpty", a.t, "no logs — panel just started"))
+			return
+		}
+		a.writeLogLinesLocked(lines)
+		return
+	}
+	a.logReady = false
+	a.logs.SetTitle(" " + tuiTr("TuiLogs", a.t, "Logs") + " ")
 	logMutex.Lock()
 	buf := append([]string(nil), logBuffer...)
 	logMutex.Unlock()
 	if len(buf) > 300 {
 		buf = buf[len(buf)-300:]
 	}
-	vis := tuiLogWindow(buf, 1<<20, a.st.logOff)
-	for _, ln := range vis {
+	a.writeLogLinesLocked(tuiLogWindow(buf, 1<<20, a.st.logOff))
+}
+
+// writeLogLinesLocked colours + writes lines, then follows the tail.
+func (a *tuiApp) writeLogLinesLocked(lines []string) {
+	for _, ln := range lines {
 		lvl := tuiLevel(ln)
 		if tuiNoColor() {
 			fmt.Fprintln(a.logs, ln)
@@ -538,27 +613,7 @@ func (a *tuiApp) refreshLocked() {
 	if a.st.logOff <= 0 && a.follow {
 		a.logs.ScrollToEnd()
 	}
-	bw := a.lastW
-	if bw <= 0 {
-		bw = 80
-	}
-	a.bar.SetText(a.barTextLocked(bw - 2))
-	fw := a.lastW
-	if fw <= 0 {
-		fw = 80
-	}
-	foot := a.footerTextLocked(fw - 2)
-	if a.msg != "" {
-		if time.Since(a.msgAt) < 8*time.Second {
-			foot = a.msg
-		} else {
-			a.msg = ""
-		}
-	}
-	a.footer.SetText(foot)
-	a.snap = snap
 }
-
 // tuiDisplayState derives the shown state from the on-demand probe.
 // Healthy probe wins: running (+ external note). Port conflict only when
 // the port is busy and nothing answers. Starting only while our child is
@@ -575,14 +630,154 @@ func tuiDisplayState(snap tuiSnapshot, probe string, t map[string]string) (strin
 		if snap.status == "port_conflict" || snap.status == tuiTr("HealthBadgePortConflict", t, "Port conflict") {
 			return tuiTr("HealthBadgePortConflict", t, "Port conflict"), ""
 		}
-		if snap.status == "not_installed" || snap.status == tuiTr("HealthBadgeNotInstalled", t, "Not installed") {
-			return tuiTr("HealthBadgeNotInstalled", t, "Not installed"), tuiTr("TuiNotInstalled", t, "")
-		}
 		return tuiTr("HealthBadgeStopped", t, "Stopped"), ""
 	default:
 		return tuiTr("ProbeUnknown", t, "Checking"), ""
 	}
 }
+
+
+// tuiThemeIsSystem reports whether cfg.Theme selects terminal defaults.
+func tuiThemeIsSystem() bool {
+	cfg := loadConfig()
+	return cfg.Theme == ThemeSystem || cfg.Theme == ""
+}
+
+// applyThemeLocked paints our own palette: dark/light get explicit
+// background/foreground/border/selection/level colours; system uses the
+// terminal defaults with NO brand colours; NO_COLOR wins over everything
+// while keeping markers/borders distinguishable (reverse stays, colours go).
+func (a *tuiApp) applyThemeLocked() {
+	if tuiNoColor() {
+		for _, l := range []*tview.List{a.listTop, a.listBak, a.listAya} {
+			if l == nil {
+				continue
+			}
+			l.SetSelectedStyle(tcell.StyleDefault.Reverse(true))
+			l.SetMainTextColor(tcell.ColorDefault)
+		}
+		return
+	}
+	cfg := loadConfig()
+	switch cfg.Theme {
+	case ThemeLight:
+		sel := tcell.StyleDefault.Foreground(tcell.ColorBlack).Background(tcell.ColorWhite).Reverse(true)
+		for _, l := range []*tview.List{a.listTop, a.listBak, a.listAya} {
+			if l == nil {
+				continue
+			}
+			l.SetSelectedStyle(sel)
+			l.SetMainTextColor(tcell.ColorBlack)
+		}
+		a.logs.SetTextColor(tcell.ColorBlack)
+	case ThemeDark:
+		sel := tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorBlack).Reverse(true)
+		for _, l := range []*tview.List{a.listTop, a.listBak, a.listAya} {
+			if l == nil {
+				continue
+			}
+			l.SetSelectedStyle(sel)
+			l.SetMainTextColor(tcell.ColorWhite)
+		}
+		a.logs.SetTextColor(tcell.ColorWhite)
+	default: // system: terminal defaults, no brand colours at all
+		for _, l := range []*tview.List{a.listTop, a.listBak, a.listAya} {
+			if l == nil {
+				continue
+			}
+			l.SetSelectedStyle(tcell.StyleDefault.Reverse(true))
+			l.SetMainTextColor(tcell.ColorDefault)
+		}
+		a.logs.SetTextColor(tcell.ColorDefault)
+	}
+}
+
+// applyTheme is the locked wrapper for non-loop callers.
+func (a *tuiApp) applyTheme() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.applyThemeLocked()
+}
+
+// tuiThemeMessage reports what the last theme press changed (TUI palette +
+// web UI theme are saved together; the TUI keeps the terminal palette only
+// in system mode).
+func tuiThemeMessage(next string, t map[string]string) string {
+	return tuiTr("TuiThemeMsg", t, "web UI theme") + ": " + next + " (" + tuiTr("TuiThemeNote", t, "TUI uses the terminal palette") + ")"
+}
+
+// syncListsLocked rebuilds every section List from tuiEntriesFor: the
+// visible List shows exactly its slice, Enter/click dispatch entries[i].id,
+// help/overflow read the same slice. Caller holds a.mu.
+func (a *tuiApp) syncListsLocked(snap tuiSnapshot) {
+	a.st.rows = tuiEntriesFor(a.st.sec, a.t, snap)
+	if a.st.sel >= len(a.st.rows) {
+		a.st.sel = len(a.st.rows) - 1
+	}
+	if a.st.sel < 0 {
+		a.st.sel = 0
+	}
+	l := a.visibleListLocked()
+	if l == nil {
+		return
+	}
+	l.Clear()
+	for i, e := range a.st.rows {
+		lbl := e.text
+		if tuiConfirmNeeded(e.id) {
+			lbl += " *"
+		}
+		l.AddItem(lbl, "", 0, nil)
+		_ = i
+	}
+	l.SetCurrentItem(a.st.sel)
+}
+
+// visibleListLocked returns the List for the current section.
+func (a *tuiApp) visibleListLocked() *tview.List {
+	switch a.st.sec {
+	case tuiSecBakim:
+		return a.listBak
+	case tuiSecAyarlar:
+		return a.listAya
+	default:
+		return a.listTop
+	}
+}
+
+// activateListIndex dispatches List index i: sections open, confirms gate,
+// plain actions run. Called by List.SetSelectedFunc (Enter AND click share
+// the path, so render/help/dispatch can never diverge).
+func (a *tuiApp) activateListIndex(index int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if index < 0 || index >= len(a.st.rows) {
+		return
+	}
+	id := a.st.rows[index].id
+	a.st.sel = index
+	if tuiEntryIsSection(id) {
+		a.st.sec = tuiSectionFor(id)
+		a.st.sel = 0
+		a.syncListsLocked(a.snap)
+		a.refreshLocked()
+		a.applyFocusLocked()
+		return
+	}
+	if tuiConfirmNeeded(id) || id == tuiActQuit {
+		a.st.confirm = id
+		a.confirmAction(id)
+		a.st.confirm = 0
+		a.refreshLocked()
+		a.applyFocusLocked()
+		a.st.lastAct = tuiActNone
+		return
+	}
+	a.st.lastAct = id
+	a.refreshLocked()
+	a.applyFocusLocked()
+}
+
 
 // barText renders the action bar with whole-chip clipping: chips that do not
 // fit are replaced by an overflow marker ("… +N"), so no chip is ever sliced
@@ -648,23 +843,48 @@ func barWidth(s string) int {
 	return tview.TaggedStringWidth(s)
 }
 
-// mainLayout builds the stable root once: header + body + bar + footer.
-// Body direction comes from the width class; the log pane always takes the
-// remaining height (proportion 1 vs status fixed rows).
+// mainLayout builds the stable root once: header + body + actions + footer.
+// The body holds status/logs; the visible action List sits below it as its
+// own focusable pane (double border + ► when focused). No TextView bar.
 func (a *tuiApp) mainLayout(width int) *tview.Flex {
 	a.body = tview.NewFlex()
 	a.applyBodyClass(width)
 	a.header.SetBorder(true)
 	a.status.SetBorder(true)
 	a.logs.SetBorder(true)
-	a.bar.SetBorder(true)
 	a.footer.SetBorder(false)
+	a.syncActionPaneLocked()
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(a.header, 3, 0, false).
 		AddItem(a.body, 0, 1, false).
-		AddItem(a.bar, 3, 0, false).
+		AddItem(a.actionPane(), 0, 1, false).
 		AddItem(a.footer, 1, 0, false)
 	return root
+}
+
+// actionPane returns the visible section List wrapped for layout. The List
+// itself carries the border + title so focus, hover and selection all live
+// in one primitive.
+func (a *tuiApp) actionPane() tview.Primitive {
+	return a.visibleListLocked()
+}
+
+// syncActionPaneLocked re-parents the visible List after a section switch.
+// tview.Flex has no replace call: remove by identity, then add.
+func (a *tuiApp) syncActionPaneLocked() {
+	root := a.pages.GetPage("main")
+	flex, ok := root.(*tview.Flex)
+	if !ok || flex == nil {
+		return
+	}
+	for _, l := range []*tview.List{a.listTop, a.listBak, a.listAya} {
+		if l != nil {
+			flex.RemoveItem(l)
+		}
+	}
+	vis := a.visibleListLocked()
+	flex.AddItem(vis, 0, 1, a.st.pane == tuiPaneActions)
+	a.applyFocusLocked()
 }
 
 func (a *tuiApp) applyFocusLocked() {
@@ -676,7 +896,11 @@ func (a *tuiApp) applyFocusLocked() {
 		focused = tcell.AttrNone
 	}
 	if a.st.pane == tuiPaneActions {
-		a.status.Focus(nil)
+		if vis := a.visibleListLocked(); vis != nil {
+			a.app.SetFocus(vis)
+		} else {
+			a.status.Focus(nil)
+		}
 		a.logs.Blur()
 		a.status.SetBorderAttributes(focused)
 		a.logs.SetBorderAttributes(tcell.AttrNone)
@@ -684,7 +908,7 @@ func (a *tuiApp) applyFocusLocked() {
 		a.logs.SetBorderColor(tcell.ColorDefault)
 		a.status.SetTitle(" \u25ba " + tuiTr("TuiStatus", a.t, "Status") + " ")
 		a.logs.SetTitle(" " + tuiTr("TuiLogs", a.t, "Logs") + " ")
-		a.bar.SetTitle(" \u25ba " + tuiTr("TuiActions", a.t, "Actions") + " ")
+		a.setListTitlesLocked(" \u25ba " + tuiTr("TuiActions", a.t, "Actions") + " ")
 	} else {
 		a.status.Blur()
 		a.logs.Focus(nil)
@@ -694,9 +918,20 @@ func (a *tuiApp) applyFocusLocked() {
 		a.logs.SetBorderColor(tcell.ColorDefault)
 		a.status.SetTitle(" " + tuiTr("TuiStatus", a.t, "Status") + " ")
 		a.logs.SetTitle(" \u25ba " + tuiTr("TuiLogs", a.t, "Logs") + " ")
+		a.setListTitlesLocked(" " + tuiTr("TuiActions", a.t, "Actions") + " ")
 	}
 	a.status.SetBorder(true)
 	a.logs.SetBorder(true)
+}
+
+// setListTitlesLocked retitles every section List (only one is visible).
+func (a *tuiApp) setListTitlesLocked(title string) {
+	for _, l := range []*tview.List{a.listTop, a.listBak, a.listAya} {
+		if l != nil {
+			l.SetTitle(title)
+			l.SetBorder(true)
+		}
+	}
 }
 
 // applyBodyClass switches stacked/two-column ONLY on class flips and keeps
@@ -892,7 +1127,7 @@ func (a *tuiApp) applyLanguageLocked(next string) {
 	}
 	a.status.SetTitle(" " + tuiTr("TuiStatus", a.t, "Status") + " ")
 	a.logs.SetTitle(" " + tuiTr("TuiLogs", a.t, "Logs") + " ")
-	a.bar.SetTitle(" " + tuiTr("TuiActions", a.t, "Actions") + " ")
+	a.setListTitlesLocked(" " + tuiTr("TuiActions", a.t, "Actions") + " ")
 	a.refreshLocked()
 	a.applyFocusLocked()
 }
@@ -966,9 +1201,17 @@ func (a *tuiApp) handleKeyEvent(ev *tcell.EventKey) *tcell.EventKey {
 				a.applyLanguageLocked(cfg.Language)
 			}
 		}
+		// Theme switch repaints our palette immediately (system = terminal
+		// defaults, NO_COLOR wins inside applyThemeLocked).
+		if act == tuiActTheme {
+			a.applyThemeLocked()
+		}
 	} else {
 		a.st.lastAct = tuiActNone
 	}
+	// Rebuild the visible List from the new state: top-level set depends on
+	// running/stopped (snapshot), and theme/language change the labels.
+	a.syncListsLocked(a.snap)
 	a.refreshLocked()
 	a.applyFocusLocked()
 	return nil

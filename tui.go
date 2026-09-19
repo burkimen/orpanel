@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -417,7 +418,36 @@ func tuiCachedPanelServing() bool {
 	return tuiPanelHit
 }
 
-
+// tuiPollPanelLogs fetches GET /api/logs?last=N incrementally: last is the
+// missed prefix index, the response carries {logs, newIndex}. Returns the
+// new lines, the cursor to pass next time, and false on any failure (the
+// caller keeps the explicit loading/empty state instead of an empty box).
+func tuiPollPanelLogs(last int) ([]string, int, bool) {
+	var out struct {
+		Logs     []string `json:"logs"`
+		NewIndex int      `json:"newIndex"`
+	}
+	client := &http.Client{Timeout: 1500 * time.Millisecond}
+	resp, err := client.Get(fmt.Sprintf("%s/api/logs?last=%d", tuiPanelURL(), last))
+	if err != nil || resp == nil {
+		return nil, last, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, last, false
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, last, false
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, last, false
+	}
+	if out.NewIndex < last {
+		out.NewIndex = last
+	}
+	return out.Logs, out.NewIndex, true
+}
 // tuiPanelEndpoint maps mutating actions to panel API paths. Every action
 // with a non-empty endpoint goes through the panel when one is serving.
 // /api/omni/reinstall exists on the panel but no TUI action exposes it.
