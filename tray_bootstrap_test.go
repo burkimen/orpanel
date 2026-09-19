@@ -59,10 +59,25 @@ func TestTrayBootstrapForeignHolder(t *testing.T) {
 	}
 }
 
-// No-arg path routes to the TUI when interactive. Deterministic: override
-// the terminal gates via the real fds is not possible in-process, so assert
-// the routing predicates directly: script seam wins, headless wins.
+// Routing regression: script seam wins, headless gets the plain summary,
+// interactive terminal gets the TUI. Pure decision, no terminal needed.
 func TestNoArgRoutingPredicates(t *testing.T) {
+	if got := decideNoArgRoute([]string{"q"}, true, true); got != routeScript {
+		t.Fatalf("script must route first, got %v", got)
+	}
+	for _, tc := range []struct {
+		in, out bool
+		want    noArgRoute
+	}{
+		{true, true, routeTUI},
+		{false, true, routePlain},
+		{true, false, routePlain},
+		{false, false, routePlain},
+	} {
+		if got := decideNoArgRoute(nil, tc.in, tc.out); got != tc.want {
+			t.Fatalf("in=%v out=%v: got %v want %v", tc.in, tc.out, got, tc.want)
+		}
+	}
 	t.Setenv("ORPANEL_TUI_SCRIPT", "")
 	if got := tuiScriptKeys(); got != nil {
 		t.Fatalf("empty script env must yield nil, got %q", got)
