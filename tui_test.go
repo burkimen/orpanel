@@ -219,10 +219,12 @@ func TestSimHelpModal(t *testing.T) {
 		if !strings.Contains(body, oneLine(r.text)) {
 			t.Fatalf("help missing row %q:\n%s", r.text, body)
 		}
-		if r.key != "" {
-			if !strings.Contains(body, "["+r.key) {
-				t.Fatalf("help missing key %q:\n%s", r.key, body)
-			}
+	}
+	// NO letter keycaps anywhere in help (owner decision): rows are
+	// `label  [*]`, never "[x] label".
+	for _, ln := range strings.Split(body, "\n") {
+		if len(ln) > 0 && ln[0] == '[' {
+			t.Fatalf("help shows letter keycap: %q\n%s", ln, body)
 		}
 	}
 	if !strings.Contains(f, "*") {
@@ -289,9 +291,6 @@ func TestSimConfirmModal(t *testing.T) {
 		t.Fatalf("List selection %q matches no row", main)
 	}
 	want := a.st.rows[idx]
-	if !strings.Contains(f, "["+want.key+"]") {
-		t.Fatalf("confirm missing action key [%s]:\n%s", want.key, f)
-	}
 	if !strings.Contains(f, want.text) {
 		t.Fatalf("confirm missing action label %q:\n%s", want.text, f)
 	}
@@ -631,16 +630,38 @@ func TestEventKeyDecode(t *testing.T) {
 			t.Fatalf("ev %v: got %+v want %+v", tc.ev, got, tc.want)
 		}
 	}
-	// Letter shortcuts are GONE (owner decision): the visible vocabulary is
-	// arrows + Tab + Enter + Esc + ? + q, and handleKey must not dispatch
-	// any letter to an action.
-	tm := tuiTestApp().t
-	rows := tuiActionRows(tm)
-	for _, b := range tuiActionBindings() {
-		st := handleKey(tuiState{pane: tuiPaneActions, rows: rows}, tuiKey{r: b.key})
-		if st.lastAct != tuiActNone || st.confirm != 0 {
-			t.Fatalf("key %q must not dispatch (got lastAct=%d confirm=%d)", b.key, st.lastAct, st.confirm)
+	// ALL letter shortcuts are GONE (owner decision): s/x/r/u/R/i/a/l/t/w
+	// must not dispatch through the REAL input path (handleKeyEvent, the
+	// same function the live loop calls) — arrows + Enter or mouse only.
+	for _, r := range []rune{'s', 'x', 'r', 'u', 'R', 'i', 'a', 'l', 't', 'w', 'j', 'k', 'J', 'K'} {
+		a := tuiTestApp()
+		simText(t, a, 80, 24)
+			sel0 := a.stateSnapshot().sel
+			msg0 := a.msgSnapshot()
+			a.handleKeyEvent(tcell.NewEventKey(tcell.KeyRune, r, tcell.ModNone))
+			snap := a.stateSnapshot()
+			if snap.lastAct != tuiActNone || snap.confirm != 0 {
+				t.Fatalf("letter %q dispatched (lastAct=%d confirm=%d)", r, snap.lastAct, snap.confirm)
+			}
+			if snap.sel != sel0 {
+				t.Fatalf("letter %q moved selection %d->%d", r, sel0, snap.sel)
+			}
+			if a.msgSnapshot() != msg0 {
+				t.Fatalf("letter %q produced message %q", r, a.msgSnapshot())
+			}
+	}
+	// Grep-proof: no action binding in the keymap table carries a letter.
+	for _, b := range tuiKeymap {
+		if b.scope == tuiScopeAction && b.key != 0 {
+			t.Fatalf("keymap still binds letter %q to act %d", b.key, b.act)
 		}
+	}
+	// ? and q still work (the only rune shortcuts left).
+	aq := tuiTestApp()
+	simText(t, aq, 80, 24)
+	simPress(aq, "?")
+	if front, _ := aq.pages.GetFrontPage(); front != "modal" {
+		t.Fatalf("? did not open help after letter removal")
 	}
 }
 
@@ -746,7 +767,10 @@ func TestSimModalSwallowsActionKeys(t *testing.T) {
 	simText(t, a, 80, 24)
 	simPress(a, "?")
 	sel := a.stateSnapshot().sel
+	// A letter must not move selection or fire inside a modal either.
 	simPress(a, "s")
+	simPress(a, "x")
+	simPress(a, "t")
 	if a.stateSnapshot().sel != sel {
 		t.Fatalf("action key moved selection inside modal")
 	}

@@ -242,20 +242,18 @@ func (a *tuiApp) helpLines() []string {
 	// Ayarlar … — section rows print their OWN sub-list entries
 	// (Bakım ▸ Kur *), never just the ▸ opener, so help names every
 	// action the panes can run.
-	keyW, lblW := 0, 0
+	// NO letter keycaps anywhere (owner decision): rows are `label  [*]`
+	// with the marker on the same line, grouped like the panes.
+	lblW := 0
 	type hrow struct {
-		key, label, mark string
+		label, mark string
 	}
 	mkrow := func(e tuiEntry, prefix string) hrow {
 		mark := " "
 		if tuiConfirmNeeded(e.id) {
 			mark = "*"
 		}
-		key := e.key
-		if key == "" {
-			key = "↵"
-		}
-		return hrow{key: "[" + key + "]", label: oneLine(prefix + e.text), mark: mark}
+		return hrow{label: oneLine(prefix + e.text), mark: mark}
 	}
 	var groups [][]hrow
 	// Top group: state actions only (▸ openers live with their sub-list
@@ -300,20 +298,13 @@ func (a *tuiApp) helpLines() []string {
 		rows = append(rows, g...)
 	}
 	for _, r := range rows {
-		if len([]rune(r.key)) > keyW {
-			keyW = len([]rune(r.key))
-		}
 		if len([]rune(r.label)) > lblW {
 			lblW = len([]rune(r.label))
 		}
 	}
 	for gi, g := range groups {
 		for _, r := range g {
-			// Brackets are tview markup: Escape the KEY token only
-			// ("[x]" -> "[x[]"), then pad on the ESCAPED width so the
-			// label column stays aligned in the rendered frame.
-			ek := tview.Escape(r.key)
-			lines = append(lines, fmt.Sprintf(" %-*s %-*s %s", keyW+2, ek, lblW, r.label, r.mark))
+			lines = append(lines, fmt.Sprintf(" %-*s %s", lblW, r.label, r.mark))
 		}
 		if gi < len(groups)-1 {
 			lines = append(lines, "")
@@ -494,19 +485,19 @@ func wrapLineWords(ln string, max int) []string {
 func (a *tuiApp) confirmAction(act int) {
 	// Label comes from st.rows (the dispatched slice), never a parallel
 	// table: the modal names exactly what Enter is about to run.
-	key, lbl := "?", ""
+	lbl := ""
 	for _, r := range a.st.rows {
 		if r.id == act {
-			key, lbl = r.key, r.text
+			lbl = r.text
 			break
 		}
 	}
-	// The modal names the action, its key, and the safe default (Esc).
+	// The modal names the action and the safe default (Esc). No letter
+	// keycap anywhere (owner decision): "Durdur?" not "[x] Durdur?".
 	// Single-line action row: the modal box never wraps it mid-phrase.
-	// tview.Escape renders "[x]" literally — no hidden chars.
-	body := fmt.Sprintf("%s %s?", tview.Escape("["+key+"]"), lbl)
+	body := fmt.Sprintf("%s?", lbl)
 	if act == tuiActQuit {
-		// Quit dialog (§9b): panel/tray keep running; safe default is
+		// Quit dialog: panel/tray keep running; safe default is
 		// cancel — Enter lands on cancel, Tab+Enter is needed to quit.
 		// Hint INSIDE the body (not the modal hint row): the button row
 		// clips to the longest button and the separate hint row re-wraps
@@ -519,6 +510,7 @@ func (a *tuiApp) confirmAction(act int) {
 		// boundary by definition, never "arka/planda".
 		qbody = splitQuitSentences(qbody)
 		a.showModal(tuiTr("TuiQuitTitle", a.t, "Quit"), qbody, "", []string{tuiTr("TuiQuitOK", a.t, "quit"), tuiTr("TuiConfirmCancel", a.t, "cancel")}, func() {
+			a.mu.Lock()
 			a.st.quit = true
 			a.mu.Unlock()
 			a.app.Stop()

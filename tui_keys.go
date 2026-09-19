@@ -63,7 +63,6 @@ type tuiRow = tuiEntry
 
 type tuiEntry struct {
 	id      int
-	key     string
 	text    string
 	section tuiSection // tuiSecTop for state actions, else owning sub-list
 }
@@ -79,6 +78,7 @@ func tuiKeyRune(r rune) tuiKey { return tuiKey{r: r} }
 // tuiEntriesFor builds the visible entry list for one section in one state.
 // Single source of truth: one List per section renders exactly this slice,
 // Enter dispatches entries[i].id, help/overflow read the same slice.
+// NO letter keys anywhere (owner decision): navigation is arrows + Enter.
 func tuiEntriesFor(sec tuiSection, t map[string]string, snap tuiSnapshot) []tuiEntry {
 	tr := func(k, fb string) string {
 		if v, ok := t[k]; ok && v != "" {
@@ -87,18 +87,18 @@ func tuiEntriesFor(sec tuiSection, t map[string]string, snap tuiSnapshot) []tuiE
 		return fb
 	}
 	state := snap.status
-	bak := tuiEntry{id: tuiActBakim, text: "▸ " + tr("TuiBakim", "Bakım")}
-	aya := tuiEntry{id: tuiActAyarlar, text: "▸ " + tr("TuiAyarlar", "Ayarlar")}
-	web := tuiEntry{id: tuiActWebUI, key: "w", text: tr("TuiWebUI", "Web UI")}
-	auto := tuiEntry{id: tuiActAutostart, key: "a", text: tr("TuiAutostart", "Autostart")}
-	lang := tuiEntry{id: tuiActLanguage, key: "l", text: tr("TuiLanguage", "Language")}
-	them := tuiEntry{id: tuiActTheme, key: "t", text: tr("TuiTheme", "Theme")}
-	start := tuiEntry{id: tuiActStart, key: "s", text: tr("TuiStart", "Start")}
-	stop := tuiEntry{id: tuiActStop, key: "x", text: tr("TuiStop", "Stop")}
-	rest := tuiEntry{id: tuiActRestart, key: "r", text: tr("TuiRestart", "Restart")}
-	upd := tuiEntry{id: tuiActUpdate, key: "u", text: tr("TuiUpdate", "Update")}
-	rep := tuiEntry{id: tuiActRepair, key: "R", text: tr("TuiRepair", "Repair")}
-	inst := tuiEntry{id: tuiActInstall, key: "i", text: tr("TuiInstall", "Install")}
+	bak := tuiEntry{id: tuiActBakim, text: "\u25b8 " + tr("TuiBakim", "Bak\u0131m")}
+	aya := tuiEntry{id: tuiActAyarlar, text: "\u25b8 " + tr("TuiAyarlar", "Ayarlar")}
+	web := tuiEntry{id: tuiActWebUI, text: tr("TuiWebUI", "Web UI")}
+	auto := tuiEntry{id: tuiActAutostart, text: tr("TuiAutostart", "Autostart")}
+	lang := tuiEntry{id: tuiActLanguage, text: tr("TuiLanguage", "Language")}
+	them := tuiEntry{id: tuiActTheme, text: tr("TuiTheme", "Theme")}
+	start := tuiEntry{id: tuiActStart, text: tr("TuiStart", "Start")}
+	stop := tuiEntry{id: tuiActStop, text: tr("TuiStop", "Stop")}
+	rest := tuiEntry{id: tuiActRestart, text: tr("TuiRestart", "Restart")}
+	upd := tuiEntry{id: tuiActUpdate, text: tr("TuiUpdate", "Update")}
+	rep := tuiEntry{id: tuiActRepair, text: tr("TuiRepair", "Repair")}
+	inst := tuiEntry{id: tuiActInstall, text: tr("TuiInstall", "Install")}
 	updAvail := snap.updateAvail
 	switch sec {
 	case tuiSecBakim:

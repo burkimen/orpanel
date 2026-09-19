@@ -47,20 +47,22 @@ const (
 	tuiNavQuit
 )
 
-// tuiKeymap is ordered actions first (state actions + sections), then the
-// visible navigation vocabulary: arrows + Tab + Enter + Esc + ? + q.
-// j/k/g/G are GONE (owner decision) — no hidden aliases anywhere.
+// tuiKeymap is the visible navigation vocabulary plus the action registry:
+// arrows + Tab + Enter + Esc + ? + q. ALL letter shortcuts are GONE (owner
+// decision): s/x/r/u/R/i/a/l/t/w have no bindings, no silent aliases, no
+// hidden fallbacks. Actions run via arrows + Enter or the mouse; the `key`
+// field below survives only for navigation runes (Tab/Enter/Esc/?/q).
 var tuiKeymap = []tuiBinding{
-	{act: tuiActStart, key: 's', label: "TuiStart", scope: tuiScopeAction, confirm: false},
-	{act: tuiActStop, key: 'x', label: "TuiStop", scope: tuiScopeAction, confirm: true},
-	{act: tuiActRestart, key: 'r', label: "TuiRestart", scope: tuiScopeAction, confirm: true},
-	{act: tuiActUpdate, key: 'u', label: "TuiUpdate", scope: tuiScopeAction, confirm: true},
-	{act: tuiActRepair, key: 'R', label: "TuiRepair", scope: tuiScopeAction, confirm: true},
-	{act: tuiActInstall, key: 'i', label: "TuiInstall", scope: tuiScopeAction, confirm: true},
-	{act: tuiActAutostart, key: 'a', label: "TuiAutostart", scope: tuiScopeAction, confirm: false},
-	{act: tuiActLanguage, key: 'l', label: "TuiLanguage", scope: tuiScopeAction, confirm: false},
-	{act: tuiActTheme, key: 't', label: "TuiTheme", scope: tuiScopeAction, confirm: false},
-	{act: tuiActWebUI, key: 'w', label: "TuiWebUI", scope: tuiScopeAction, confirm: false},
+	{act: tuiActStart, label: "TuiStart", scope: tuiScopeAction, confirm: false},
+	{act: tuiActStop, label: "TuiStop", scope: tuiScopeAction, confirm: true},
+	{act: tuiActRestart, label: "TuiRestart", scope: tuiScopeAction, confirm: true},
+	{act: tuiActUpdate, label: "TuiUpdate", scope: tuiScopeAction, confirm: true},
+	{act: tuiActRepair, label: "TuiRepair", scope: tuiScopeAction, confirm: true},
+	{act: tuiActInstall, label: "TuiInstall", scope: tuiScopeAction, confirm: true},
+	{act: tuiActAutostart, label: "TuiAutostart", scope: tuiScopeAction, confirm: false},
+	{act: tuiActLanguage, label: "TuiLanguage", scope: tuiScopeAction, confirm: false},
+	{act: tuiActTheme, label: "TuiTheme", scope: tuiScopeAction, confirm: false},
+	{act: tuiActWebUI, label: "TuiWebUI", scope: tuiScopeAction, confirm: false},
 	{act: tuiNavSelect, keyName: "↑↓", label: "TuiNavSelect", hint: "TuiHintSelect", scope: tuiScopePane, panes: []int{tuiPaneActions}},
 	{act: tuiNavPane, key: '\t', keyName: "Tab", label: "TuiNavPane", hint: "TuiHintPane", scope: tuiScopeGlobal},
 	{act: tuiNavActivate, key: '\r', keyName: "Enter", label: "TuiNavActivate", hint: "TuiHintActivate", scope: tuiScopePane, panes: []int{tuiPaneActions}},
@@ -102,38 +104,10 @@ func tuiFooterBindings(pane int) []tuiBinding {
 	return out
 }
 
-// tuiBindingByKey finds an ACTION binding by rune, case-insensitive.
-// 'R' (repair) wins over 'r' (restart) only on exact uppercase match.
-// Navigation entries are never returned here (they are not dispatched).
+// tuiBindingByKey is RETIRED: no letter shortcut may dispatch an action
+// (owner decision). Only ? and q are rune-dispatched, handled directly in
+// handleKey. Any caller needing it back is re-adding a removed feature.
 func tuiBindingByKey(r rune) (tuiBinding, bool) {
-	for _, b := range tuiKeymap {
-		if b.scope != tuiScopeAction {
-			continue
-		}
-		if b.key == r {
-			return b, true
-		}
-	}
-	// Case-insensitive fallback for single-case bindings.
-	lower := r
-	if lower >= 'A' && lower <= 'Z' {
-		lower = lower - 'A' + 'a'
-	}
-	for _, b := range tuiKeymap {
-		if b.scope != tuiScopeAction {
-			continue
-		}
-		if b.key == 'R' {
-			continue // R is uppercase-only (repair vs restart).
-		}
-		bl := b.key
-		if bl >= 'A' && bl <= 'Z' {
-			bl = bl - 'A' + 'a'
-		}
-		if bl == lower {
-			return b, true
-		}
-	}
 	return tuiBinding{}, false
 }
 
