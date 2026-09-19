@@ -1053,6 +1053,13 @@ func (a *tuiApp) setListTitlesLocked(title string) {
 func (a *tuiApp) applyBodyClass(width int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.applyBodyClassLocked(width)
+}
+
+// applyBodyClassLocked is the lock-held core; callers holding a.mu (the
+// after-draw callback, tick closures) must use this, never applyBodyClass.
+// Caller holds a.mu.
+func (a *tuiApp) applyBodyClassLocked(width int) {
 	wide := width >= 100
 	if a.body == nil {
 		a.body = tview.NewFlex()
@@ -1157,8 +1164,8 @@ func runTuiApp() {
 		if w > 0 && h > 0 {
 			a.mu.Lock()
 			a.lastW, a.lastH = w, h
+			a.applyBodyClassLocked(w)
 			a.mu.Unlock()
-			a.applyBodyClass(w)
 		}
 		tuiDiagLog("afterDraw #%d exit", n)
 		if n == 1 {
