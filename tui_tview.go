@@ -82,7 +82,6 @@ type tuiApp struct {
 	body      *tview.Flex
 	status    *tview.TextView
 	logs      *tview.TextView
-	bar       *tview.TextView
 	header    *tview.TextView
 	footer    *tview.TextView
 	mu        sync.Mutex // guards st/msg/probe/focus-class below; event loop vs tick/test
@@ -158,13 +157,11 @@ func newTuiApp() *tuiApp {
 	a.status.SetWrap(false)
 	a.logs = tview.NewTextView().SetDynamicColors(!tuiNoColor()).SetScrollable(true)
 	a.logs.SetWrap(false)
-	a.bar = tview.NewTextView().SetDynamicColors(true)
-	a.bar.SetWrap(false)
 	a.header = tview.NewTextView().SetDynamicColors(!tuiNoColor())
 	a.header.SetWrap(false)
 	a.footer = tview.NewTextView().SetDynamicColors(!tuiNoColor())
 	a.footer.SetWrap(false)
-	for _, v := range []*tview.TextView{a.status, a.logs, a.bar, a.header, a.footer} {
+	for _, v := range []*tview.TextView{a.status, a.logs, a.header, a.footer} {
 		v.SetBorder(false)
 	}
 	a.status.SetTitle(" " + tuiTr("TuiStatus", a.t, "Status") + " ")
@@ -230,25 +227,24 @@ func (a *tuiApp) footerTextLocked(width int) string {
 }
 
 
-// helpLines returns the help modal as whole lines: one compact row per
-// action ("key label", destructive marked with *), navigation hints joined
-// into whole pairs. Short enough that the modal (lines+6) fits 80x24.
+// helpLines returns the help modal from the SAME entry data the Lists
+// render and Enter dispatches: current section entries with * marks, then
+// the visible navigation vocabulary. No parallel list may exist.
 func (a *tuiApp) helpLines() []string {
 	var lines []string
 	lines = append(lines, tuiTr("TuiHelpActTitle", a.t, "Actions")+" ("+tuiTr("TuiConfirmLegend", a.t, "* needs confirm")+")")
-	// Same slice the bar renders and Enter dispatches: st.rows.
-	// Compact "key label[*]": tview.Escape renders "[x]" literally in
-	// the modal with dynamic colors on AND off — no hidden chars.
 	for _, r := range a.st.rows {
 		mark := ""
 		if tuiConfirmNeeded(r.id) {
 			mark = " *"
 		}
-		lines = append(lines, fmt.Sprintf(" %s %s%s", tview.Escape("["+r.key+"]"), oneLine(r.text), mark))
+		key := r.key
+		if key == "" {
+			key = "↵"
+		}
+		lines = append(lines, fmt.Sprintf(" %s %s%s", tview.Escape("["+key+"]"), oneLine(r.text), mark))
 	}
 	lines = append(lines, "")
-	// Navigation: two whole-pair rows (select/activate, pane/cancel) plus
-	// one short hints row — keys stay discoverable without overflowing.
 	var pairs []string
 	for _, bd := range tuiFooterBindings(tuiPaneActions) {
 		if bd.scope != tuiScopeGlobal && bd.scope != tuiScopePane {
@@ -258,6 +254,7 @@ func (a *tuiApp) helpLines() []string {
 		pairs = append(pairs, tuiKeyName(bd)+" "+lbl)
 	}
 	lines = append(lines, wrapPairs(pairs, 40)...)
+	lines = append(lines, tuiTr("TuiMouseNote", a.t, "mouse on: click selects, wheel scrolls, Shift selects text"))
 	return lines
 }
 
@@ -722,9 +719,11 @@ func tuiThemeMessage(next string, t map[string]string) string {
 	return tuiTr("TuiThemeMsg", t, "web UI theme") + ": " + next + " (" + tuiTr("TuiThemeNote", t, "TUI uses the terminal palette") + ")"
 }
 
-// syncListsLocked rebuilds every section List from tuiEntriesFor: the
-// visible List shows exactly its slice, Enter/click dispatch entries[i].id,
-// help/overflow read the same slice. Caller holds a.mu.
+// syncListsLocked rebuilds every section List from tuiEntriesFor: each
+// List shows exactly its own slice, Enter/click dispatch entries[i].id,
+// help/overflow read the same slice. st.rows always mirrors the VISIBLE
+// list so legacy handleKey/confirm/help paths index the same data.
+// Caller holds a.mu.
 func (a *tuiApp) syncListsLocked(snap tuiSnapshot) {
 	a.st.rows = tuiEntriesFor(a.st.sec, a.t, snap)
 	if a.st.sel >= len(a.st.rows) {
@@ -733,20 +732,52 @@ func (a *tuiApp) syncListsLocked(snap tuiSnapshot) {
 	if a.st.sel < 0 {
 		a.st.sel = 0
 	}
-	l := a.visibleListLocked()
-	if l == nil {
-		return
-	}
-	l.Clear()
-	for i, e := range a.st.rows {
-		lbl := e.text
-		if tuiConfirmNeeded(e.id) {
-			lbl += " *"
+	for _, sec := range []tuiSection{tuiSecTop, tuiSecBakim, tuiSecAyarlar} {
+		entries := tuiEntriesFor(sec, a.t, snap)
+		l := a.listForSectionLocked(sec)
+		if l == nil {
+			continue
 		}
-		l.AddItem(lbl, "", 0, nil)
-		_ = i
+		l.Clear()
+		for _, e := range entries {
+			lbl := e.text
+			if tuiConfirmNeeded(e.id) {
+				lbl += " *"
+			}
+			l.AddItem(lbl, "", 0, nil)
+		}
 	}
-	l.SetCurrentItem(a.st.sel)
+	a.retitleListsLocked()
+	if vis := a.visibleListLocked(); vis != nil {
+		vis.SetCurrentItem(a.st.sel)
+	}
+}
+
+// listForSectionLocked returns the List owned by sec.
+func (a *tuiApp) listForSectionLocked(sec tuiSection) *tview.List {
+	switch sec {
+	case tuiSecBakim:
+		return a.listBak
+	case tuiSecAyarlar:
+		return a.listAya
+	default:
+		return a.listTop
+	}
+}
+
+// retitleListsLocked names each List with its section + count.
+func (a *tuiApp) retitleListsLocked() {
+	base := tuiTr("TuiActions", a.t, "Actions")
+	if a.listTop != nil {
+		a.listTop.SetTitle(" " + base + " ")
+	}
+	bak, aya := tuiTr("TuiBakim", a.t, "Bakım"), tuiTr("TuiAyarlar", a.t, "Ayarlar")
+	if a.listBak != nil {
+		a.listBak.SetTitle(" " + bak + " ")
+	}
+	if a.listAya != nil {
+		a.listAya.SetTitle(" " + aya + " ")
+	}
 }
 
 // visibleListLocked returns the List for the current section.
@@ -794,70 +825,6 @@ func (a *tuiApp) activateListIndex(index int) {
 	a.applyFocusLocked()
 }
 
-
-// barText renders the action bar with whole-chip clipping: chips that do not
-// fit are replaced by an overflow marker ("… +N"), so no chip is ever sliced
-// mid-word and no action is undiscoverable (the help modal lists every key).
-// The bar TextView also grows to two rows when needed (see mainLayout).
-func (a *tuiApp) barText(width int) string {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.barTextLocked(width)
-}
-
-// barChips renders one chip per st.rows entry — the same slice arrow
-// navigation and Enter dispatch index into. No parallel list may exist:
-// rendering, navigation, and dispatch share st.rows as the single source,
-// so a hidden chip can never shift the visible labels relative to the data.
-func (a *tuiApp) barChips() []string {
-	pane, sel := a.st.pane, a.st.sel
-	chips := make([]string, 0, len(a.st.rows))
-	for i, r := range a.st.rows {
-		// Escape ONLY the keycap: "[x]" -> "[x[]" renders literally.
-		// Selection is reverse + ">"…"<" markers with colors on;
-		// markers alone under NO_COLOR — distinguishable either way.
-		plain := fmt.Sprintf("%s %s", tview.Escape("["+r.key+"]"), r.text)
-		if pane == tuiPaneActions && i == sel {
-			if tuiNoColor() {
-				c := ">" + plain + "<"
-				chips = append(chips, c)
-				continue
-			}
-			c := "[::r]>" + plain + "<[::-]"
-			chips = append(chips, c)
-			continue
-		}
-		chips = append(chips, plain)
-	}
-	return chips
-}
-
-func (a *tuiApp) barTextLocked(width int) string {
-	if width <= 0 {
-		width = 80
-	}
-	chips := a.barChips()
-	full := strings.Join(chips, "  ")
-	if barWidth(full) <= width {
-		return full
-	}
-	// Drop whole chips from the end until the overflow marker fits.
-	for n := len(chips) - 1; n > 1; n-- {
-		marker := fmt.Sprintf("… +%d", len(chips)-n)
-		kept := strings.Join(chips[:n], "  ")
-		if barWidth(kept+"  "+marker) <= width {
-			return kept + "  " + marker
-		}
-	}
-	return chips[0]
-}
-
-// barWidth counts what the terminal actually shows. Keycaps are
-// tview-escaped ("[x[]" renders "[x]"), selection uses real tags
-// ([::r]/[::-]), so tview.TaggedStringWidth is the honest measure.
-func barWidth(s string) int {
-	return tview.TaggedStringWidth(s)
-}
 
 // mainLayout builds the stable root once: header + body + actions + footer.
 // The body holds status/logs; the visible action List sits below it as its
