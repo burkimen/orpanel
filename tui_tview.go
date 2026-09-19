@@ -1146,10 +1146,19 @@ func runTuiApp() {
 			time.Sleep(300 * time.Millisecond)
 			// Bar row sits 2 rows above the bottom (bar + footer rows);
 			// log row is the first body row below the header (row 4).
+			// Action pane: rows above the bar (hh-4, hh-5, hh-6 hold the
+			// last entries); status pane: rows 4-9 of the left column.
+			// Env-gated via tuiDiagReadCells (inert when unset).
 			_, hh := screen.Size()
 			tuiDiagLog("first-draw cells row0=%s title=%s border=%s bar=%s logrow=%s",
 				tuiDiagReadCells(0, 0, 20), tuiDiagReadCells(2, 0, 30), tuiDiagReadCells(0, 3, 20),
 				tuiDiagReadCells(0, hh-3, 60), tuiDiagReadCells(0, 4, 60))
+			tuiDiagLog("first-draw actions act0=%s act1=%s act2=%s act3=%s",
+				tuiDiagReadCells(0, hh-7, 60), tuiDiagReadCells(0, hh-6, 60),
+				tuiDiagReadCells(0, hh-5, 60), tuiDiagReadCells(0, hh-4, 60))
+			tuiDiagLog("first-draw status srow0=%s srow1=%s srow2=%s srow3=%s srow4=%s srow5=%s",
+				tuiDiagReadCells(0, 4, 40), tuiDiagReadCells(0, 5, 40), tuiDiagReadCells(0, 6, 40),
+				tuiDiagReadCells(0, 7, 40), tuiDiagReadCells(0, 8, 40), tuiDiagReadCells(0, 9, 40))
 			tuiDiagConsoleState("after-first-draw")
 		}()
 	}
