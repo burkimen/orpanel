@@ -53,23 +53,29 @@ durumsal alt bilgi. Gerisi veri panelleri. Oranlar:
 
 ## 3. Fare modeli (kütüphane denetlendi: tview v0.42)
 
-- TEK ÇAĞRI: `Application.EnableMouse(true)` (+ isteğe bağlı global
-  `SetMouseCapture`). Her etkileşimli ilkel zaten `MouseHandler` uygular:
-  `List`, `Table`, `TextView` (tekerlek kaydırma), `Form`→`Button` üzerinden
-  modallar, isabet testiyle `Flex`/`Grid`/`Pages`. Bugün uygulama bu çağrıyı
-  hiç yapmıyor — v1.4.5'te farenin ölü olmasının sebebi bu; tcell terminalin
-  fare protokolünü istemiyor, hiçbir fare olayı gelmiyor.
-- Davranış: hover satırı `›` + kalın; seçim `►` + ters video (`SetSelectedStyle`
-  ile çizilir, iki yol aynı gösterge). Tık seçer; yıkıcı olmayanda ikinci
-  tık çalıştırır, yıkıcıda onay penceresi açar. Tekerlek Kayıtlar/Yardım'ı
-  kaydırır. Panele tıklamak odağı taşır. Modal düğmeleri tıklanabilir;
-  varsayılan `onayla` (Enter).
-- Sonuçlar (dürüst): (a) fare olayı taşımayan uçta klavye yolu BİREBİR aynı
-  ve eksiksiz kalır; (b) fare kipi açıkken uçbirimde metin seçimi genelde
-  Shift gerektirir — yardım metni + README bunu bir satırla yazar.
-- Doğrulama: koşum gerçek fare enjekte edemez; en yakın kanıt, aynı
-  `MouseHandler` zincirine sentetik fare olayı sürmek + sahibinin
-  terminalinde gerçek yol onayıdır.
+- Kütüphaneden GELEN (tek çağrı: `Application.EnableMouse(true)`, artı
+  isteğe bağlı global `SetMouseCapture`): tıkla-seç, tıkla-çalıştır,
+  klavye gezintisi/seçimi, tekerlek kaydırma. Her etkileşimli ilkel zaten
+  `MouseHandler` uygular (`List`, `Table`, `TextView`, `Form`→`Button`
+  üzerinden modallar, isabet testiyle `Flex`/`Grid`/`Pages` — grep ile
+  doğrulandı). Bugün uygulama bu çağrıyı hiç yapmıyor; v1.4.5'te farenin
+  ölü olmasının sebebi bu.
+- Kütüphanede YOK — `›` HOVER BİZİM KODUMUZ: pakette hover stili, hareket
+  takibi, `›` benzeri hiçbir şey yok (`List.MouseHandler` yalnızca
+  dikdörtgeni içindeki tıklamalara tepki verir). Uygulama düzeyi
+  `SetMouseCapture` işleyicisi `*tcell.EventMouse` hareket olaylarını
+  (düğme yok + konum değişti) inceler, imleç satırını liste girdisine
+  eşler ve YALNIZCA o satırın `›` işaretini yeniden çizer (seçimi
+  kütüphane çizer, hover satırını biz). Seçim `►` + ters video
+  (`SetSelectedStyle`); hover `›` + kalın — kare dökümü ikisini FARKLI
+  satırlarda gösterir.
+- Sonuç: hareket olayı yalnızca uçbirim raporluyorsa gelir (Windows
+  Terminal verir, bazıları vermez) — olay yoksa hover YOKTUR; tık/tekerlek/
+  klavye eksiksiz çalışır ve alt bilgi o uçta hover vaat etmez. Fare kipi
+  açıkken uçbirimde metin seçimi genelde Shift gerektirir (yardım + README).
+- Doğrulama (hover kendi alt görevidir): aynı yakalama işleyicisine
+  sentetik hareket olayı sürülür → `›` beklenen satıra taşınır, ayrılınca
+  silinir; kare dökümü seçim ve hover işaretlerini farklı satırlarda gösterir.
 
 ## 4. Klavye
 
