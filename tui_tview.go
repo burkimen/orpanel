@@ -229,31 +229,106 @@ func (a *tuiApp) footerTextLocked(width int) string {
 
 // helpLines returns the help modal from the SAME entry data the Lists
 // render and Enter dispatches: current section entries with * marks, then
-// the visible navigation vocabulary. No parallel list may exist.
+// the visible navigation vocabulary. One line per entry, left aligned, in
+// stable columns (key / label / * on the SAME line), grouped like the panes
+// (state actions, then Bakım, then Ayarlar). Never wraps mid-word: callers
+// fit whole lines or drop them, never reflow inside a word.
 func (a *tuiApp) helpLines() []string {
 	var lines []string
 	lines = append(lines, tuiTr("TuiHelpActTitle", a.t, "Actions")+" ("+tuiTr("TuiConfirmLegend", a.t, "* needs confirm")+")")
-	for _, r := range a.st.rows {
-		mark := ""
-		if tuiConfirmNeeded(r.id) {
-			mark = " *"
+	// Stable column widths so key/label/* read as a grid. Widths come
+	// from the data (longest key/label in THIS list), not constants.
+	// Groups mirror the panes: state actions, then Bakım …, then
+	// Ayarlar … — section rows print their OWN sub-list entries
+	// (Bakım ▸ Kur *), never just the ▸ opener, so help names every
+	// action the panes can run.
+	keyW, lblW := 0, 0
+	type hrow struct {
+		key, label, mark string
+	}
+	mkrow := func(e tuiEntry, prefix string) hrow {
+		mark := " "
+		if tuiConfirmNeeded(e.id) {
+			mark = "*"
 		}
-		key := r.key
+		key := e.key
 		if key == "" {
 			key = "↵"
 		}
-		lines = append(lines, fmt.Sprintf(" %s %s%s", tview.Escape("["+key+"]"), oneLine(r.text), mark))
+		return hrow{key: "[" + key + "]", label: oneLine(prefix + e.text), mark: mark}
+	}
+	var groups [][]hrow
+	// Top group: state actions only (▸ openers live with their sub-list
+	// group below, so no action is listed twice).
+	var cur []hrow
+	for _, r := range a.st.rows {
+		if tuiEntryIsSection(r.id) {
+			continue
+		}
+		cur = append(cur, mkrow(r, ""))
+	}
+	if len(cur) > 0 {
+		groups = append(groups, cur)
+	}
+	snap := a.snap
+	for _, sec := range []tuiSection{tuiSecBakim, tuiSecAyarlar} {
+		// Only list a section group when its ▸ opener is visible.
+		open := false
+		for _, r := range a.st.rows {
+			if tuiSectionFor(r.id) == sec && tuiEntryIsSection(r.id) {
+				open = true
+				break
+			}
+		}
+		if !open {
+			continue
+		}
+		var sub []hrow
+		for _, e := range tuiEntriesFor(sec, a.t, snap) {
+			pfx := tuiTr("TuiBakim", a.t, "Bakım") + " ▸ "
+			if sec == tuiSecAyarlar {
+				pfx = tuiTr("TuiAyarlar", a.t, "Ayarlar") + " ▸ "
+			}
+			sub = append(sub, mkrow(e, pfx))
+		}
+		if len(sub) > 0 {
+			groups = append(groups, sub)
+		}
+	}
+	var rows []hrow
+	for _, g := range groups {
+		rows = append(rows, g...)
+	}
+	for _, r := range rows {
+		if len([]rune(r.key)) > keyW {
+			keyW = len([]rune(r.key))
+		}
+		if len([]rune(r.label)) > lblW {
+			lblW = len([]rune(r.label))
+		}
+	}
+	for gi, g := range groups {
+		for _, r := range g {
+			// Brackets are tview markup: Escape the KEY token only
+			// ("[x]" -> "[x[]"), then pad on the ESCAPED width so the
+			// label column stays aligned in the rendered frame.
+			ek := tview.Escape(r.key)
+			lines = append(lines, fmt.Sprintf(" %-*s %-*s %s", keyW+2, ek, lblW, r.label, r.mark))
+		}
+		if gi < len(groups)-1 {
+			lines = append(lines, "")
+		}
 	}
 	lines = append(lines, "")
-	var pairs []string
+	// Navigation block: one pair per line, never joined mid-phrase.
+	lines = append(lines, tuiTr("TuiHelpNavTitle", a.t, "Navigation"))
 	for _, bd := range tuiFooterBindings(tuiPaneActions) {
 		if bd.scope != tuiScopeGlobal && bd.scope != tuiScopePane {
 			continue
 		}
 		lbl := tuiTr(bd.label, a.t, tuiKeyName(bd))
-		pairs = append(pairs, tuiKeyName(bd)+" "+lbl)
+		lines = append(lines, fmt.Sprintf(" %-*s %s", 10, tuiKeyName(bd), lbl))
 	}
-	lines = append(lines, wrapPairs(pairs, 40)...)
 	lines = append(lines, tuiTr("TuiMouseNote", a.t, "mouse on: click selects, wheel scrolls, Shift selects text"))
 	return lines
 }
@@ -303,24 +378,38 @@ func (a *tuiApp) closeModalSync() {
 	a.applyFocusLocked()
 }
 func (a *tuiApp) showModal(title, body, hint string, buttons []string, onOK func(), onClose func()) {
-	// Fit first (word-wise wrap + height budget), then pad to the widest
-	// surviving line so tview's word-wrap has nothing left to reflow: the
-	// box sizes to content instead of clipping it mid-word.
+	// Word-boundary fit only: compute the longest line that fits, break
+	// between words, never inside a word. tview.Modal centers text and
+	// re-wraps on its own box width, so pre-wrapping mid-word (or padding
+	// lines wider than the box) is what split "arkaplanda" and the help
+	// rows before. Here: wrap at spaces, keep one line per entry.
 	w, h := a.modalFitSize()
-	if w > 0 {
-		body = fitModalWidth(body, w-2)
-		// Hint stays on ONE row: it names the safe default (Esc) and
-		// must never wrap it onto a clipped second line. Width fit
-		// only guards overflow; the modal centers short hints.
-		hint = fitModalHint(hint, w-2)
-	}
+	_ = w
+	// NO pre-wrap: tview.Modal centers the text and WordWraps it to its
+	// own box (word boundaries + CJK-aware widths). Every pre-wrap we
+	// tried (screen width, button width, widest line) disagreed with the
+	// box by a few cells and the box re-wrapped mid-word ("arka/planda").
+	// The box width derives from the longest line, so unwrapped text
+	// sizes the box to fit and no second wrap can split a word.
 	if h > 0 {
 		body = fitModalBody(body, hint, len(buttons), h)
 	}
-	body = padToWidth(body)
+	// Bracket-style buttons with the safe default marked: the owner asked
+	// for "[ onayla ]   [ vazgeç ]" with the default visually distinct.
+	// tview.Button renders its label verbatim; focus (first button gets
+	// it via SetFocus(0) below) drives reverse video, and the "►" prefix
+	// marks the default even with colours off.
+	br := make([]string, len(buttons))
+	for i, b := range buttons {
+		if i == len(buttons)-1 {
+			br[i] = "► [ " + b + " ]"
+		} else {
+			br[i] = "[ " + b + " ]"
+		}
+	}
 	m := tview.NewModal().
 		SetText(body + "\n\n" + hint).
-		AddButtons(buttons).
+		AddButtons(br).
 		SetDoneFunc(func(i int, label string) {
 			if onClose != nil {
 				onClose()
@@ -332,6 +421,7 @@ func (a *tuiApp) showModal(title, body, hint string, buttons []string, onOK func
 		})
 	m.SetTitle(" " + title + " ")
 	m.SetBorder(true)
+	m.SetFocus(len(br) - 1)
 	if !a.pages.HasPage("modal") {
 		a.pages.AddPage("modal", m, true, true)
 	} else {
@@ -367,43 +457,15 @@ func fitModalBody(body, hint string, nButtons, height int) string {
 	return strings.Join(append(kept, marker), "\n")
 }
 
-// fitModalWidth wraps overlong lines word-wise so the modal never exceeds
-// width (reserving 10 columns for borders and centering margin). Wrapping
-// happens only at spaces, so phrases stay intact.
-func fitModalWidth(body string, width int) string {
-	max := width - 10
-	if max < 16 {
-		max = 16
-	}
+// wrapModalWords wraps every line at word boundaries to fit max runes:
+// break between words, never inside a word. A single overlong word is kept
+// whole (the modal centers it; slicing "arkaplanda" is worse than overflow).
+func wrapModalWords(s string, max int) string {
 	var out []string
-	for _, ln := range strings.Split(body, "\n") {
+	for _, ln := range strings.Split(s, "\n") {
 		out = append(out, wrapLineWords(ln, max)...)
 	}
 	return strings.Join(out, "\n")
-}
-
-// fitModalHint wraps the hint line(s) at the same width so the hint row
-// never overflows the modal box mid-phrase.
-func fitModalHint(hint string, width int) string {
-	max := width - 10
-	if max < 16 {
-		max = 16
-	}
-	var out []string
-	for _, ln := range strings.Split(hint, "\n") {
-		out = append(out, wrapLineWords(ln, max)...)
-	}
-	return strings.Join(out, "\n")
-}
-
-func modalInnerWidth(body string) int {
-	w := 0
-	for _, ln := range strings.Split(body, "\n") {
-		if n := len([]rune(ln)); n > w {
-			w = n
-		}
-	}
-	return w
 }
 
 // wrapLineWords breaks one line at spaces only; a single overlong word is
@@ -429,22 +491,6 @@ func wrapLineWords(ln string, max int) []string {
 	return append(out, cur)
 }
 
-// padToWidth pads every line with spaces to the widest rune width so the
-// modal sizes to its content instead of wrapping mid-word.
-func padToWidth(s string) string {
-	lines := strings.Split(s, "\n")
-	w := 0
-	for _, ln := range lines {
-		if n := len([]rune(ln)); n > w {
-			w = n
-		}
-	}
-	for i, ln := range lines {
-		lines[i] = ln + strings.Repeat(" ", w-len([]rune(ln)))
-	}
-	return strings.Join(lines, "\n")
-}
-
 func (a *tuiApp) confirmAction(act int) {
 	// Label comes from st.rows (the dispatched slice), never a parallel
 	// table: the modal names exactly what Enter is about to run.
@@ -462,8 +508,17 @@ func (a *tuiApp) confirmAction(act int) {
 	if act == tuiActQuit {
 		// Quit dialog (§9b): panel/tray keep running; safe default is
 		// cancel — Enter lands on cancel, Tab+Enter is needed to quit.
-		a.showModal(tuiTr("TuiQuitTitle", a.t, "Quit"), tuiTr("TuiQuitMsg", a.t, "Close the TUI? The panel and tray keep running."), tuiTr("TuiConfirmHint", a.t, "Enter confirm · Esc cancel"), []string{tuiTr("TuiQuitOK", a.t, "quit"), tuiTr("TuiConfirmCancel", a.t, "cancel")}, func() {
-			a.mu.Lock()
+		// Hint INSIDE the body (not the modal hint row): the button row
+		// clips to the longest button and the separate hint row re-wraps
+		// against a narrower box ("arka/planda"). Body text renders full.
+		qbody := tuiTr("TuiQuitMsg", a.t, "Close the TUI? The panel and tray keep running.") + "\n" + tuiTr("TuiConfirmHint", a.t, "Enter confirm · Esc cancel")
+		// Pre-split at the sentence boundary: the modal box derives its
+		// width from the longest line and WordWraps the rest, so a
+		// single 66-rune sentence re-wraps mid-word at box width. Two
+		// short lines fit the box whole — a sentence split is a word
+		// boundary by definition, never "arka/planda".
+		qbody = splitQuitSentences(qbody)
+		a.showModal(tuiTr("TuiQuitTitle", a.t, "Quit"), qbody, "", []string{tuiTr("TuiQuitOK", a.t, "quit"), tuiTr("TuiConfirmCancel", a.t, "cancel")}, func() {
 			a.st.quit = true
 			a.mu.Unlock()
 			a.app.Stop()
@@ -490,6 +545,35 @@ func (a *tuiApp) confirmAction(act int) {
 		a.st.confirm = 0
 		a.st.lastAct = tuiActNone
 	})
+}
+
+// splitQuitSentences pre-splits a two-sentence quit message at the sentence
+// boundary so the modal box (sized from the longest line) fits each line
+// whole. WordWrap would otherwise re-wrap the 66-rune sentence mid-word.
+// Only splits on "? " / ". " / "! " followed by an uppercase letter.
+func splitQuitSentences(s string) string {
+	lines := strings.Split(s, "\n")
+	var out []string
+	for _, ln := range lines {
+		out = append(out, splitOneSentence(ln)...)
+	}
+	return strings.Join(out, "\n")
+}
+
+// splitOneSentence splits one line at sentence ends ("? "/"! " always;
+// ". " only when followed by an uppercase letter, so "C:\path\x.exe"
+// and version numbers never split).
+func splitOneSentence(ln string) []string {
+	runes := []rune(ln)
+	for i := 0; i+2 < len(runes); i++ {
+		if (runes[i] == '?' || runes[i] == '!') && runes[i+1] == ' ' {
+			return []string{string(runes[: i+1]), string(runes[i+2:])}
+		}
+		if runes[i] == '.' && runes[i+1] == ' ' && runes[i+2] >= 'A' && runes[i+2] <= 'Z' {
+			return []string{string(runes[: i+1]), string(runes[i+2:])}
+		}
+	}
+	return []string{ln}
 }
 
 func (a *tuiApp) setMsg(s string) {
@@ -545,7 +629,15 @@ func (a *tuiApp) refreshLocked() {
 	}
 	tuiDumpStateMu.Unlock()
 	clock := time.Now().Format("15:04:05")
-	a.header.SetText(headerText(a.lastW, snap.appVer, snap.omniVer, snap.lang, snap.theme, clock))
+	// Header token uses the PINNED language when dumping (ORPANEL_TUI_LANG):
+	// snap.lang comes from the saved config (es on this machine) while the
+	// panes render a.t — the token must agree with the panes. Theme shows
+	// the saved theme (the palette in use); live path unchanged.
+	hlang := snap.lang
+	if dl := os.Getenv("ORPANEL_TUI_LANG"); dl != "" {
+		hlang = dl
+	}
+	a.header.SetText(headerText(a.lastW, snap.appVer, snap.omniVer, hlang, snap.theme, clock))
 	// Fixed 11-cell label column (§1) with badge + tepsi + yönetim rows.
 	var sb strings.Builder
 	badge := "○"
@@ -561,11 +653,11 @@ func (a *tuiApp) refreshLocked() {
 		trayOn = tuiTr("TuiOn", a.t, "On")
 	}
 	fmt.Fprintf(&sb, "%-11s %s\n", tuiTr("TuiTray", a.t, "Tray"), trayOn)
+	mgmtVal := tuiTr("TuiManagedLocal", a.t, "this process")
 	if tuiCachedPanelServing() {
-		fmt.Fprintf(&sb, "%s\n", tuiTr("TuiManagedPanel", a.t, "managed by panel (:20127)"))
-	} else {
-		fmt.Fprintf(&sb, "%s\n", tuiTr("TuiManagedLocal", a.t, "managed by this process"))
+		mgmtVal = tuiTr("TuiManagedPanel", a.t, "panel (:20127)")
 	}
+	fmt.Fprintf(&sb, "%-11s %s\n", tuiTr("TuiMgmt", a.t, "managed"), mgmtVal)
 	if snap.external && (snap.probe == "healthy" || snap.probe == "starting") {
 		fmt.Fprintf(&sb, "%s\n", tuiTr("TuiExternalNote", a.t, "Externally managed"))
 	}
@@ -784,11 +876,12 @@ func (a *tuiApp) syncListsLocked(snap tuiSnapshot) {
 			if tuiConfirmNeeded(e.id) {
 				lbl += " *"
 			}
-			// Hover is OUR marker (tview has none): the hovered row
-			// of the visible List carries a bold prefix so selection
-			// (reverse video) and hover stay on different rows.
+			// Hover is OUR marker (tview has none): a trailing " ›" on
+			// the hovered row of the visible List, so the " *" confirm
+			// column the help grid pins stays byte-identical between
+			// List items and helpLines (selection is reverse video).
 			if sec == a.st.sec && i == a.hover && a.hoverList == l {
-				lbl = "› " + lbl
+				lbl += " ›"
 			}
 			l.AddItem(lbl, "", 0, nil)
 		}

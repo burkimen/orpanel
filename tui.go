@@ -355,10 +355,10 @@ func runTuiScript(names []string) {
 		setCurrentLang(lang)
 	}
 	a := newTuiApp()
-	// ORPANEL_TUI_STATE forces the display state for review dumps
-	// (running|stopped): the live loop derives it from the probe, but a
-	// dump env cannot guarantee a healthy/dead OmniRoute on demand.
-	// Test seam only, not a user feature.
+	// Panes resolve from the PINNED language: takeTuiSnapshot reads the
+	// saved config (es on this machine), which would leave the header
+	// token (snap.lang/snap.theme) disagreeing with the Turkish panes.
+	// Same language/theme the panes use, so every token agrees.
 	if st := os.Getenv("ORPANEL_TUI_STATE"); st == "running" || st == "stopped" {
 		tuiProbeCacheMu.Lock()
 		if st == "running" {
@@ -378,6 +378,11 @@ func runTuiScript(names []string) {
 			tuiDumpState = ""
 			tuiDumpStateMu.Unlock()
 		}()
+		// Seed snap BEFORE the first simFrame: handler + sync paths read
+		// a.snap (not the probe) for the entry set, and refreshLocked
+		// overwrites a.snap from the live snapshot afterwards.
+		a.snap = tuiSnapshot{status: st, updateAvail: true}
+		a.syncListsLocked(a.snap)
 	}
 	// Harness runs on its own goroutine (not the event loop), so the tick
 	// below is safe. NOTE: tuiProbeWorkerTick refreshes STALE caches only —

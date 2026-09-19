@@ -60,7 +60,7 @@ func englishTestMap() map[string]string {
 		"TuiBakim": "Maintenance", "TuiAyarlar": "Settings",
 		"TuiQuitTitle": "Quit", "TuiQuitMsg": "Close it?", "TuiQuitOK": "quit",
 		"TuiLogLoading": "loading…", "TuiLogEmpty": "no logs",
-		"TuiMouseNote": "mouse note", "TuiTray": "Tray",
+		"TuiMouseNote": "mouse note", "TuiTray": "Tray", "TuiMgmt": "managed",
 		"TuiThemeMsg": "theme", "TuiThemeNote": "note",
 	}
 }
@@ -204,13 +204,23 @@ func TestSimHelpModal(t *testing.T) {
 	// modal body — because the 80-col box legitimately scrolls/clips rows
 	// in the rendered frame (see TestHelpModalScrollable).
 	body := strings.Join(a.helpLines(), "\n")
+	// Help lists state actions directly and section sub-entries as
+	// "<Group> > <label>" rows (openers are grouping, not actions).
 	for _, r := range a.st.rows {
+		if tuiEntryIsSection(r.id) {
+			if r.id == tuiActBakim && !strings.Contains(body, "Bak") && !strings.Contains(body, "aintenance") && !strings.Contains(body, "antenimiento") {
+				t.Fatalf("help missing Bakim group:\n%s", body)
+			}
+			if r.id == tuiActAyarlar && !strings.Contains(body, "Ayarlar") && !strings.Contains(body, "ettings") && !strings.Contains(body, "justes") {
+				t.Fatalf("help missing Ayarlar group:\n%s", body)
+			}
+			continue
+		}
 		if !strings.Contains(body, oneLine(r.text)) {
 			t.Fatalf("help missing row %q:\n%s", r.text, body)
 		}
 		if r.key != "" {
-			want := "[" + r.key + "[]"
-			if !strings.Contains(body, want) {
+			if !strings.Contains(body, "["+r.key) {
 				t.Fatalf("help missing key %q:\n%s", r.key, body)
 			}
 		}
@@ -1157,4 +1167,19 @@ func pressEntry(a *tuiApp, id int, t *testing.T) {
 		a.handleKeyEvent(tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone))
 	}
 	a.handleKeyEvent(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+}
+
+// TestSplitQuitSentences: the quit message pre-splits at the sentence end so
+// the modal box fits each line whole — WordWrap must never see a 66-rune
+// sentence it re-wraps mid-word ("arka/planda").
+func TestSplitQuitSentences(t *testing.T) {
+	want := []string{"TUI kapatılsın mı?", "Panel ve tepsi arka planda çalışmaya devam eder."}
+	parts := splitOneSentence("TUI kapatılsın mı? Panel ve tepsi arka planda çalışmaya devam eder.")
+	if len(parts) != len(want) || parts[0] != want[0] || parts[1] != want[1] {
+		t.Fatalf("split = %q want %q", parts, want)
+	}
+	// No split inside paths/versions: ". " only splits before uppercase.
+	if p := splitOneSentence(`C:\a\b.exe devam`); len(p) != 1 {
+		t.Fatalf("path split: %q", p)
+	}
 }
