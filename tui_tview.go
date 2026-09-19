@@ -1126,34 +1126,54 @@ func runTuiApp() {
 		n := atomic.AddInt64(&afterDraws, 1)
 		w, h := screen.Size()
 		tuiDiagLog("afterDraw #%d size=%dx%d", n, w, h)
+		// Read FIRST, before applyBodyClass mutates the tree below: draw()
+		// holds the app lock through after(), so no draw interleaves, but
+		// applyBodyClass Clear()s + re-adds the body AFTER root.Draw
+		// painted — reading after it sees the new tree against old cells.
+		// Same screen object, pre-mutation = truth.
+		if tuiDiagOn() && (n == 1 || n == 2 || n == 4) {
+			// Positions from the LIVE rects, not arithmetic: the action
+			// List sits wherever the layout put it (draw #1: y=16..28).
+			l := a.visibleListLocked()
+			lx, ly, lw, lh := 0, 0, 0, 0
+			if l != nil {
+				lx, ly, lw, lh = l.GetRect()
+			}
+			_ = lx
+			_ = lw
+			_ = lh
+			tuiDiagLog("draw#%d header=%s border=%s", n,
+				tuiDiagScreenRow(screen, 0, 0, 40), tuiDiagScreenRow(screen, 0, 3, 40))
+			tuiDiagLog("draw#%d actions y=%d act0=%s act1=%s act2=%s act3=%s", n, ly,
+				tuiDiagScreenRow(screen, 0, ly+1, 80), tuiDiagScreenRow(screen, 0, ly+2, 80),
+				tuiDiagScreenRow(screen, 0, ly+3, 80), tuiDiagScreenRow(screen, 0, ly+4, 80))
+			tuiDiagLog("draw#%d status srow0=%s srow4=%s srow5=%s", n,
+				tuiDiagScreenRow(screen, 0, 4, 60), tuiDiagScreenRow(screen, 0, 8, 60),
+				tuiDiagScreenRow(screen, 0, 9, 60))
+		}
 		if w > 0 && h > 0 {
 			a.mu.Lock()
 			a.lastW, a.lastH = w, h
 			a.mu.Unlock()
 			a.applyBodyClass(w)
 		}
-	tuiDiagLog("afterDraw #%d exit", n)
-	if n == 1 {
-		go func() {
-			time.Sleep(300 * time.Millisecond)
-			// Bar row sits 2 rows above the bottom (bar + footer rows);
-			// log row is the first body row below the header (row 4).
-			// Action pane: rows above the bar (hh-4, hh-5, hh-6 hold the
-			// last entries); status pane: rows 4-9 of the left column.
-			// Env-gated via tuiDiagReadCells (inert when unset).
-			_, hh := screen.Size()
-			tuiDiagLog("first-draw cells row0=%s title=%s border=%s bar=%s logrow=%s",
-				tuiDiagReadCells(0, 0, 20), tuiDiagReadCells(2, 0, 30), tuiDiagReadCells(0, 3, 20),
-				tuiDiagReadCells(0, hh-3, 60), tuiDiagReadCells(0, 4, 60))
-			tuiDiagLog("first-draw actions act0=%s act1=%s act2=%s act3=%s",
-				tuiDiagReadCells(0, hh-7, 60), tuiDiagReadCells(0, hh-6, 60),
-				tuiDiagReadCells(0, hh-5, 60), tuiDiagReadCells(0, hh-4, 60))
-			tuiDiagLog("first-draw status srow0=%s srow1=%s srow2=%s srow3=%s srow4=%s srow5=%s",
-				tuiDiagReadCells(0, 4, 40), tuiDiagReadCells(0, 5, 40), tuiDiagReadCells(0, 6, 40),
-				tuiDiagReadCells(0, 7, 40), tuiDiagReadCells(0, 8, 40), tuiDiagReadCells(0, 9, 40))
-			tuiDiagConsoleState("after-first-draw")
-		}()
-	}
+		tuiDiagLog("afterDraw #%d exit", n)
+		if n == 1 {
+			go func() {
+				time.Sleep(300 * time.Millisecond)
+				_, hh := screen.Size()
+				tuiDiagLog("first-draw cells row0=%s title=%s border=%s bar=%s logrow=%s",
+					tuiDiagReadCells(0, 0, 20), tuiDiagReadCells(2, 0, 30), tuiDiagReadCells(0, 3, 20),
+					tuiDiagReadCells(0, hh-3, 60), tuiDiagReadCells(0, 4, 60))
+				tuiDiagLog("first-draw actions act0=%s act1=%s act2=%s act3=%s",
+					tuiDiagReadCells(0, hh-7, 60), tuiDiagReadCells(0, hh-6, 60),
+					tuiDiagReadCells(0, hh-5, 60), tuiDiagReadCells(0, hh-4, 60))
+				tuiDiagLog("first-draw status srow0=%s srow1=%s srow2=%s srow3=%s srow4=%s srow5=%s",
+					tuiDiagReadCells(0, 4, 40), tuiDiagReadCells(0, 5, 40), tuiDiagReadCells(0, 6, 40),
+					tuiDiagReadCells(0, 7, 40), tuiDiagReadCells(0, 8, 40), tuiDiagReadCells(0, 9, 40))
+				tuiDiagConsoleState("after-first-draw")
+			}()
+		}
 	})
 	tick := time.NewTicker(1 * time.Second)
 	defer tick.Stop()

@@ -10,8 +10,15 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/gdamore/tcell/v2"
 	"golang.org/x/sys/windows"
 )
+
+// tuiDiagScreen is the tcell.Screen subset the read-back needs.
+type tuiDiagScreen interface {
+	GetContent(x, y int) (rune, []rune, tcell.Style, int)
+	Size() (int, int)
+}
 
 var modKernel32 = syscall.NewLazyDLL("kernel32.dll")
 var procReadConsoleOutputCharacter = modKernel32.NewProc("ReadConsoleOutputCharacterW")
@@ -41,6 +48,28 @@ func tuiDiagReadCells(x, y, n int) string {
 	return fmt.Sprintf("%q(read=%d)", syscall.UTF16ToString(buf[:read]), read)
 }
 
+// tuiDiagScreenRow reads n cells of row y from the tcell screen tview just
+// painted (the after-draw callback parameter). Same object, same draw call:
+// no console round-trip, no stale buffer. Env-gated, inert when unset.
+func tuiDiagScreenRow(screen tuiDiagScreen, x, y, n int) string {
+	if !tuiDiagOn() {
+		return "<diag-off>"
+	}
+	runes := make([]rune, 0, n)
+	for i := range n {
+		main, comb, _, _ := screen.GetContent(x+i, y)
+		if main == 0 && len(comb) == 0 {
+			runes = append(runes, ' ')
+			continue
+		}
+		if main == 0 && len(comb) > 0 {
+			runes = append(runes, comb[0])
+			continue
+		}
+		runes = append(runes, main)
+	}
+	return fmt.Sprintf("%q", string(runes))
+}
 // tuiDiag is env-gated instrumentation (ORPANEL_TUI_DIAG=1) writing stage
 // lines to %TEMP%/orpanel-tui-diag.log. Opt-in only; normal path untouched.
 func tuiDiagOn() bool { return os.Getenv("ORPANEL_TUI_DIAG") == "1" }
