@@ -148,7 +148,7 @@ func newTuiApp() *tuiApp {
 	a.status.SetWrap(false)
 	a.logs = tview.NewTextView().SetDynamicColors(!tuiNoColor()).SetScrollable(true)
 	a.logs.SetWrap(false)
-	a.bar = tview.NewTextView().SetDynamicColors(!tuiNoColor())
+	a.bar = tview.NewTextView().SetDynamicColors(true)
 	a.bar.SetWrap(false)
 	a.header = tview.NewTextView().SetDynamicColors(!tuiNoColor())
 	a.header.SetWrap(false)
@@ -209,14 +209,14 @@ func (a *tuiApp) helpLines() []string {
 	var lines []string
 	lines = append(lines, tuiTr("TuiHelpActTitle", a.t, "Actions")+" ("+tuiTr("TuiConfirmLegend", a.t, "* needs confirm")+")")
 	// Same slice the bar renders and Enter dispatches: st.rows.
-	// Compact "key label[*]": no keycap brackets (tview tags), no padding
-	// that the modal width-fitter can wrap mid-row.
+	// Compact "key label[*]": tview.Escape renders "[x]" literally in
+	// the modal with dynamic colors on AND off — no hidden chars.
 	for _, r := range a.st.rows {
 		mark := ""
 		if tuiConfirmNeeded(r.id) {
 			mark = " *"
 		}
-		lines = append(lines, fmt.Sprintf(" %s %s%s", r.key, oneLine(r.text), mark))
+		lines = append(lines, fmt.Sprintf(" %s %s%s", tview.Escape("["+r.key+"]"), oneLine(r.text), mark))
 	}
 	lines = append(lines, "")
 	// Navigation: two whole-pair rows (select/activate, pane/cancel) plus
@@ -429,8 +429,8 @@ func (a *tuiApp) confirmAction(act int) {
 	}
 	// The modal names the action, its key, and the safe default (Esc).
 	// Single-line action row: the modal box never wraps it mid-phrase.
-	// Keycap "s[NBSP]": not a tview tag, renders literally either way.
-	body := fmt.Sprintf("[%s ] %s?", key, lbl)
+	// tview.Escape renders "[x]" literally — no hidden chars.
+	body := fmt.Sprintf("%s %s?", tview.Escape("["+key+"]"), lbl)
 	a.showModal(tuiTr("TuiConfirmTitle", a.t, "Confirm"), body, tuiTr("TuiConfirmHint", a.t, "Enter confirm · Esc cancel"), []string{tuiTr("TuiConfirmOK", a.t, "confirm"), tuiTr("TuiConfirmCancel", a.t, "cancel")}, func() {
 		msg := tuiDoAction(act, a.t)
 		a.setMsg(msg)
@@ -602,17 +602,21 @@ func (a *tuiApp) barChips() []string {
 	pane, sel := a.st.pane, a.st.sel
 	chips := make([]string, 0, len(a.st.rows))
 	for i, r := range a.st.rows {
-		// Keycap "s[NBSP]": not a tview tag, renders literally with
-		// colors on AND off — no Escape (which leaves a "[]" residue).
-		c := fmt.Sprintf("[%s ] %s", r.key, r.text)
+		// Escape ONLY the keycap: "[x]" -> "[x[]" renders literally.
+		// Selection is reverse + ">"…"<" markers with colors on;
+		// markers alone under NO_COLOR — distinguishable either way.
+		plain := fmt.Sprintf("%s %s", tview.Escape("["+r.key+"]"), r.text)
 		if pane == tuiPaneActions && i == sel {
 			if tuiNoColor() {
-				c = ">" + c + "<"
-			} else {
-				c = "[::r]" + c + "[::-]"
+				c := ">" + plain + "<"
+				chips = append(chips, c)
+				continue
 			}
+			c := "[::r]>" + plain + "<[::-]"
+			chips = append(chips, c)
+			continue
 		}
-		chips = append(chips, c)
+		chips = append(chips, plain)
 	}
 	return chips
 }
@@ -637,15 +641,11 @@ func (a *tuiApp) barTextLocked(width int) string {
 	return chips[0]
 }
 
-// barWidth counts what the terminal actually shows: our chips contain
-// literal "[x]" key caps, which tview's TaggedStringWidth consumes as
-// zero-width tags — so measure literally, discounting only the real tags
-// we emit ([::r], [::-], [-]).
+// barWidth counts what the terminal actually shows. Keycaps are
+// tview-escaped ("[x[]" renders "[x]"), selection uses real tags
+// ([::r]/[::-]), so tview.TaggedStringWidth is the honest measure.
 func barWidth(s string) int {
-	for _, tag := range []string{"[::r]", "[::-]", "[-]"} {
-		s = strings.ReplaceAll(s, tag, "")
-	}
-	return len([]rune(s))
+	return tview.TaggedStringWidth(s)
 }
 
 // mainLayout builds the stable root once: header + body + bar + footer.
@@ -782,8 +782,12 @@ func runTuiApp() {
 	if n == 1 {
 		go func() {
 			time.Sleep(300 * time.Millisecond)
-			tuiDiagLog("first-draw cells row0=%s title=%s border=%s",
-				tuiDiagReadCells(0, 0, 20), tuiDiagReadCells(2, 0, 30), tuiDiagReadCells(0, 3, 20))
+			// Bar row sits 2 rows above the bottom (bar + footer rows);
+			// log row is the first body row below the header (row 4).
+			_, hh := screen.Size()
+			tuiDiagLog("first-draw cells row0=%s title=%s border=%s bar=%s logrow=%s",
+				tuiDiagReadCells(0, 0, 20), tuiDiagReadCells(2, 0, 30), tuiDiagReadCells(0, 3, 20),
+				tuiDiagReadCells(0, hh-3, 60), tuiDiagReadCells(0, 4, 60))
 			tuiDiagConsoleState("after-first-draw")
 		}()
 	}
@@ -820,7 +824,7 @@ func runTuiApp() {
 		time.Sleep(5 * time.Second)
 		n := atomic.LoadInt64(&afterDraws)
 		tuiDiagLog("watchdog: afterDraws=%d", n)
-		tuiDiagLog("watchdog cells row0=%s", tuiDiagReadCells(0, 0, 20))
+		tuiDiagLog("watchdog cells row0=%s bar=%s", tuiDiagReadCells(0, 0, 20), tuiDiagReadCells(0, 21, 60))
 		if n == 0 {
 			tuiDiagDumpStacks("no-afterDraw-in-5s")
 		}

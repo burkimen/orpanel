@@ -25,12 +25,21 @@ func tuiTestApp() *tuiApp {
 	// ambient CI/dev shells (NO_COLOR=1 here) must not change rendering.
 	_ = os.Setenv("NO_COLOR", "")
 	a := newTuiApp()
-	a.t = map[string]string{
+	a.t = englishTestMap()
+	a.st = tuiState{pane: tuiPaneActions, rows: tuiActionRows(a.t)}
+	return a
+}
+
+// englishTestMap is the fixed English label set, shared so NO_COLOR tests
+// can build an app without resetting the color pin.
+func englishTestMap() map[string]string {
+	return map[string]string{
 		"TuiStatus": "Status", "TuiLogs": "Logs", "TuiActions": "Actions",
 		"TuiHelpTitle": "Keys", "TuiHelpNavTitle": "Navigation", "TuiHelpActTitle": "Actions",
 		"TuiNavHint": "Tab switch pane", "TuiClose": "Close", "TuiHelp": "Help",
 		"TuiConfirmTitle": "Confirm", "TuiConfirmHint": "Enter confirm",
 		"TuiConfirmOK": "confirm", "TuiConfirmCancel": "cancel",
+		"TuiConfirmLegend": "* needs confirm",
 		"TuiHintScrollLine": "arrows select", "TuiHintSelect": "select",
 		"TuiHintPane": "switch pane", "TuiHintActivate": "run", "TuiHintCancel": "close",
 		"TuiHintScroll": "scroll", "TuiHintEdges": "top/bottom",
@@ -40,7 +49,6 @@ func tuiTestApp() *tuiApp {
 		"TuiTooSmall": "Terminal too small (need 60x16)",
 		"HealthBadgeRunning": "Running", "HealthBadgeStopped": "Stopped",
 		"HealthBadgeNotInstalled": "Not installed", "HealthBadgePortConflict": "Port conflict",
-		"HealthLabelVersion": "Version", "HealthLabelPort": "Port", "HealthLabelNode": "Node",
 		"ProbeStarting": "Starting", "ProbeDegraded": "Not responding", "ProbeUnknown": "Checking",
 		"TuiStart": "Start", "TuiStop": "Stop", "TuiRestart": "Restart", "TuiUpdate": "Update",
 		"TuiRepair": "Repair", "TuiInstall": "Install", "TuiAutostart": "Autostart",
@@ -48,8 +56,6 @@ func tuiTestApp() *tuiApp {
 		"TuiManagedPanel": "managed by panel", "TuiManagedLocal": "managed local",
 		"TuiOpFailed": "failed", "TuiOpStarted": "Started",
 	}
-	a.st = tuiState{pane: tuiPaneActions, rows: tuiActionRows(a.t)}
-	return a
 }
 
 // TestConstructorRegistersRoot gates the blank-console class: tview draws
@@ -192,7 +198,13 @@ func TestSimHelpModal(t *testing.T) {
 	// in the rendered frame (see TestHelpModalScrollable).
 	body := strings.Join(a.helpLines(), "\n")
 	for _, r := range a.st.rows {
-		if !strings.Contains(body, " "+r.key+" ") {
+		// helpLines escapes keycaps ("[s[]" renders "[s]"); "?" is not
+		// a tag start and stays "[?]".
+		want := "[" + r.key + "[]"
+		if r.key == "?" {
+			want = "[?]"
+		}
+		if !strings.Contains(body, want) {
 			t.Fatalf("help missing key %q:\n%s", r.key, body)
 		}
 	}
@@ -226,9 +238,10 @@ func TestSimConfirmModal(t *testing.T) {
 	}
 	// Names the action keycap, its row label, and the safe default.
 	// Kept as the permanent visual gate for the destructive-action path.
+	// Keycaps render literally as "[x]" (tview-escaped); no hidden chars.
 	sel := a.stateSnapshot().sel
 	want := a.st.rows[sel]
-	if !strings.Contains(f, "["+want.key+" ]") {
+	if !strings.Contains(f, "["+want.key+"]") {
 		t.Fatalf("confirm missing action key [%s]:\n%s", want.key, f)
 	}
 	if !strings.Contains(f, want.text) {
@@ -240,8 +253,6 @@ func TestSimConfirmModal(t *testing.T) {
 }
 
 // TestBarClipsWholeChips gates mid-word clipping: at 80 and 120 cols the
-// rendered bar row must contain the first entry's keycap and end on a chip
-// boundary or the overflow marker — never sliced, never missing entry 0.
 func TestBarClipsWholeChips(t *testing.T) {
 	for _, w := range []int{80, 120} {
 		a := tuiTestApp()
@@ -249,7 +260,7 @@ func TestBarClipsWholeChips(t *testing.T) {
 		f := simText(t, a, w, 24)
 		var barRow string
 		for _, ln := range strings.Split(f, "\n") {
-			if strings.Contains(ln, "["+first.key+" ]") {
+			if strings.Contains(ln, "["+first.key+"]") {
 				barRow = ln
 			}
 		}
@@ -296,8 +307,8 @@ func TestEnterDispatchesVisibleEntry(t *testing.T) {
 }
 
 // TestBarLabelsMatchEntries: every rendered chip label equals the entry
-// label in order — no missing, extra, or empty entries. Keycaps carry a
-// trailing NBSP ("[x ]") so tview never treats them as color tags.
+// label in order — no missing, extra, or empty entries. Keycaps render
+// literally as "[x]" (tview-escaped); assert the VISIBLE string.
 func TestBarLabelsMatchEntries(t *testing.T) {
 	for _, w := range []int{80, 120} {
 		a := tuiTestApp()
@@ -309,11 +320,39 @@ func TestBarLabelsMatchEntries(t *testing.T) {
 			if r.text == "" || r.key == "" {
 				t.Fatalf("entry %d renders empty: %+v", i, r)
 			}
-			if !strings.Contains(chips[i], "["+r.key+" ]") || !strings.Contains(chips[i], r.text) {
+			// barChips escapes keycaps ("[s[]" renders "[s]"); "?" is
+			// not a tag start and stays "[?]".
+			want := "[" + r.key + "[]"
+			if r.key == "?" {
+				want = "[?]"
+			}
+			if !strings.Contains(chips[i], want) || !strings.Contains(chips[i], r.text) {
 				t.Fatalf("chip %d = %q, want key %q label %q", i, chips[i], r.key, r.text)
 			}
 		}
 	}
+}
+
+// TestSelectedChipDistinguishableNoColor: with NO_COLOR=1 the selected chip
+// keeps its ">"…"<" markers (reverse attr is a no-op without color), so
+// selection stays distinguishable on the accessibility path.
+func TestSelectedChipDistinguishableNoColor(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	// newTuiApp reads NO_COLOR at construction (dynamic colors off), so
+	// build AFTER pinning the env — tuiTestApp would reset it to colors-on.
+	a := newTuiApp()
+	a.t = englishTestMap()
+	a.st = tuiState{pane: tuiPaneActions, rows: tuiActionRows(a.t)}
+	chips := a.barChips()
+	sel := chips[a.st.sel]
+	if !strings.HasPrefix(sel, ">") || !strings.HasSuffix(sel, "<") {
+		t.Fatalf("NO_COLOR selected chip missing markers: %q", sel)
+	}
+	f := simText(t, a, 80, 24)
+	if !strings.Contains(f, ">") {
+		t.Fatalf("NO_COLOR frame has no selection marker:\n%s", f)
+	}
+	t.Setenv("NO_COLOR", "")
 }
 
 // TestEnterBehindOverflowMarker: with chips hidden at 80 cols, the visible
