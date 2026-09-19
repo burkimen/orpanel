@@ -459,6 +459,22 @@ func (a *tuiApp) confirmAction(act int) {
 	// Single-line action row: the modal box never wraps it mid-phrase.
 	// tview.Escape renders "[x]" literally — no hidden chars.
 	body := fmt.Sprintf("%s %s?", tview.Escape("["+key+"]"), lbl)
+	if act == tuiActQuit {
+		// Quit dialog (§9b): panel/tray keep running; safe default is
+		// cancel — Enter lands on cancel, Tab+Enter is needed to quit.
+		a.showModal(tuiTr("TuiQuitTitle", a.t, "Quit"), tuiTr("TuiQuitMsg", a.t, "Close the TUI? The panel and tray keep running."), tuiTr("TuiConfirmHint", a.t, "Enter confirm · Esc cancel"), []string{tuiTr("TuiQuitOK", a.t, "quit"), tuiTr("TuiConfirmCancel", a.t, "cancel")}, func() {
+			a.mu.Lock()
+			a.st.quit = true
+			a.mu.Unlock()
+			a.app.Stop()
+		}, func() {
+			a.mu.Lock()
+			defer a.mu.Unlock()
+			a.st.confirm = 0
+			a.st.lastAct = tuiActNone
+		})
+		return
+	}
 	a.showModal(tuiTr("TuiConfirmTitle", a.t, "Confirm"), body, tuiTr("TuiConfirmHint", a.t, "Enter confirm · Esc cancel"), []string{tuiTr("TuiConfirmOK", a.t, "confirm"), tuiTr("TuiConfirmCancel", a.t, "cancel")}, func() {
 		msg := tuiDoAction(act, a.t)
 		a.setMsg(msg)
@@ -986,6 +1002,11 @@ func runTuiApp() {
 	tuiDiagConsoleState("after-own-setup")
 	tuiDiagLog("newTuiApp start")
 	a := newTuiApp()
+	// Mouse comes from the library: one call requests the terminal mouse
+	// protocol; List/TextView/Modal handlers do the rest (§3). OUR hover
+	// is separate (SetMouseCapture below): motion → › marker repaint.
+	a.app.EnableMouse(true)
+	a.setupMouseCapture()
 	tuiDiagLog("newTuiApp done (root set at construction)")
 	a.refresh()
 	tuiDiagLog("refresh done")
@@ -1113,7 +1134,61 @@ func (a *tuiApp) setupInputCapture() {
 	})
 }
 
-// applyLanguageLocked reloads the translation map + action rows after `l`
+// setupMouseCapture installs OUR hover: application-level motion handling.
+// The library has NO hover (List.MouseHandler answers clicks only), so we
+// inspect *tcell.EventMouse motion (button none, position changed), map the
+// cursor row to the visible List entry, and repaint only that row's ›
+// marker; selection stays the library's. No motion events → no hover,
+// clicks/wheel/keyboard unaffected. Caller: runTuiApp (not tests directly).
+func (a *tuiApp) setupMouseCapture() {
+	a.app.SetMouseCapture(func(ev *tcell.EventMouse, action tview.MouseAction) (*tcell.EventMouse, tview.MouseAction) {
+		if action != tview.MouseMove {
+			return ev, action
+		}
+		a.handleMouseMove(ev)
+		return ev, action
+	})
+}
+
+// handleMouseMove maps a motion event to a visible-List row. Pure position
+// math under a.mu; safe to call from tests with synthetic events.
+func (a *tuiApp) handleMouseMove(ev *tcell.EventMouse) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if ev == nil || ev.Buttons() != tcell.ButtonNone {
+		return
+	}
+	l := a.visibleListLocked()
+	if l == nil {
+		a.hover, a.hoverList = -1, nil
+		return
+	}
+	x, y := ev.Position()
+	idx := listIndexAt(l, x, y)
+	if idx < 0 {
+		a.hover, a.hoverList = -1, nil
+		return
+	}
+	a.hover, a.hoverList = idx, l
+}
+
+// listIndexAt maps screen coords to a List row via its inner rect.
+func listIndexAt(l *tview.List, x, y int) int {
+	if l == nil {
+		return -1
+	}
+	rx, ry, _, h := l.GetInnerRect()
+	i := y - ry
+	_ = rx
+	if i < 0 || i >= h {
+		return -1
+	}
+	if i >= l.GetItemCount() {
+		return -1
+	}
+	return i
+}
+
 // so titles, chips, footer and help switch language immediately (no restart).
 // Caller holds a.mu.
 func (a *tuiApp) applyLanguageLocked(next string) {
