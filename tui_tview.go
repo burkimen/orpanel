@@ -1144,6 +1144,9 @@ func runTuiApp() {
 			_ = lh
 			tuiDiagLog("draw#%d header=%s border=%s", n,
 				tuiDiagScreenRow(screen, 0, 0, 40), tuiDiagScreenRow(screen, 0, 3, 40))
+			front, _ := a.pages.GetFrontPage()
+			tuiDiagLog("draw#%d pages=%d front=%q ly=%d", n,
+				a.pages.GetPageCount(), front, ly)
 			tuiDiagLog("draw#%d actions y=%d act0=%s act1=%s act2=%s act3=%s", n, ly,
 				tuiDiagScreenRow(screen, 0, ly+1, 80), tuiDiagScreenRow(screen, 0, ly+2, 80),
 				tuiDiagScreenRow(screen, 0, ly+3, 80), tuiDiagScreenRow(screen, 0, ly+4, 80))
