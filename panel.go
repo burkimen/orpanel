@@ -1493,16 +1493,10 @@ func main() {
 	}
 
 	// No flags: scripted frames (test seam), full-screen TUI on a terminal,
-	// plain summary when headless.
-	if script := tuiScriptKeys(); script != nil {
-		runTuiScript(script)
-		return
-	}
-	if !isTerminal() || !isTerminalOut() {
-		printPlainSummary()
-		return
-	}
-	runTUI()
+	// plain summary when headless. The TUI needs a serving panel, so the
+	// no-arg path ensures the tray first (see tray_bootstrap.go); quitting
+	// the TUI leaves the tray running.
+	noArgLaunch()
 }
 
 func isTerminal() bool {
