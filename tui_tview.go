@@ -519,7 +519,25 @@ func (a *tuiApp) refreshLocked() {
 	snap.probe = probe
 	snap.probeLabel = tuiProbeLabel(probe, a.t)
 	state, stateNote := tuiDisplayState(snap, probe, a.t)
-	snap.status = state
+	// Entries switch on the MACHINE token (running/stopped/...); the
+	// display label is localized (Çalışıyor/Durdu/...) and must not
+	// overwrite it before syncListsLocked. Status pane uses `state`.
+	machine := snap.status
+	// Review-dump override (ORPANEL_TUI_STATE): the dump env cannot
+	// guarantee a live/dead OmniRoute on demand. Live path unaffected
+	// (tuiDumpState empty unless the dump harness sets it).
+	tuiDumpStateMu.Lock()
+	if tuiDumpState == "running" || tuiDumpState == "stopped" {
+		machine = tuiDumpState
+		if tuiDumpState == "running" {
+			state = tuiTr("HealthBadgeRunning", a.t, "Running")
+			snap.probe = "healthy"
+		} else {
+			state = tuiTr("HealthBadgeStopped", a.t, "Stopped")
+			snap.probe = "unreachable"
+		}
+	}
+	tuiDumpStateMu.Unlock()
 	clock := time.Now().Format("15:04:05")
 	a.header.SetText(headerText(a.lastW, snap.appVer, snap.omniVer, snap.lang, snap.theme, clock))
 	// Fixed 11-cell label column (§1) with badge + tepsi + yönetim rows.
@@ -552,6 +570,7 @@ func (a *tuiApp) refreshLocked() {
 		fmt.Fprintf(&sb, "%s\n", snap.opPhase)
 	}
 	a.status.SetText(strings.TrimRight(sb.String(), "\n"))
+	snap.status = machine
 	a.syncListsLocked(snap)
 	a.renderLogsLocked(snap)
 	fw := a.lastW

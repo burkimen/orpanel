@@ -63,6 +63,10 @@ var (
 	tuiProbeCacheMu sync.Mutex
 	tuiProbeCache   string
 	tuiProbeCacheAt time.Time
+	// tuiDumpState pins the machine token for review dumps
+	// (ORPANEL_TUI_STATE=running|stopped). Empty = live behaviour.
+	tuiDumpStateMu sync.Mutex
+	tuiDumpState   string
 )
 
 // tuiRefreshProbeCache dials OmniRoute and stores the outcome. WORKER ONLY:
@@ -351,11 +355,35 @@ func runTuiScript(names []string) {
 		setCurrentLang(lang)
 	}
 	a := newTuiApp()
-	// Harness runs on its own goroutine (not the event loop), so warming
-	// the worker caches here is safe and gives dumps real probe values.
+	// ORPANEL_TUI_STATE forces the display state for review dumps
+	// (running|stopped): the live loop derives it from the probe, but a
+	// dump env cannot guarantee a healthy/dead OmniRoute on demand.
+	// Test seam only, not a user feature.
+	if st := os.Getenv("ORPANEL_TUI_STATE"); st == "running" || st == "stopped" {
+		tuiProbeCacheMu.Lock()
+		if st == "running" {
+			tuiProbeCache = "healthy"
+		} else {
+			tuiProbeCache = "unreachable"
+		}
+		tuiProbeCacheAt = time.Now()
+		tuiProbeCacheMu.Unlock()
+		// Machine state for the entry builder: the dump env cannot
+		// guarantee a live/dead OmniRoute on demand, so pin it here.
+		tuiDumpStateMu.Lock()
+		tuiDumpState = st
+		tuiDumpStateMu.Unlock()
+		defer func() {
+			tuiDumpStateMu.Lock()
+			tuiDumpState = ""
+			tuiDumpStateMu.Unlock()
+		}()
+	}
+	// Harness runs on its own goroutine (not the event loop), so the tick
+	// below is safe. NOTE: tuiProbeWorkerTick refreshes STALE caches only —
+	// the forced probe above is fresh (<2s), so it survives the warmup.
 	tuiProbeWorkerTick()
 	sim := tcell.NewSimulationScreen("UTF-8")
-	fmt.Print(simFrame(a, sim, w, h) + "\n---FRAME---\n")
 	for _, n := range names {
 		if n == "tick" {
 			w2 := w
