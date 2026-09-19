@@ -601,16 +601,14 @@ func (a *tuiApp) refreshLocked() {
 	snap.probe = probe
 	snap.probeLabel = tuiProbeLabel(probe, a.t)
 	state, stateNote := tuiDisplayState(snap, probe, a.t)
-	// Entries switch on the MACHINE token (running/stopped/...); the
-	// display label is localized (Çalışıyor/Durdu/...) and must not
-	// overwrite it before syncListsLocked. Status pane uses `state`.
-	machine := snap.status
+	// Entries switch on the MACHINE token resolved below from the same
+	// `state` the status rows paint (see tuiMachineState); the raw
+	// snapshot token may be stale pre-probe. Status pane uses `state`.
 	// Review-dump override (ORPANEL_TUI_STATE): the dump env cannot
 	// guarantee a live/dead OmniRoute on demand. Live path unaffected
 	// (tuiDumpState empty unless the dump harness sets it).
 	tuiDumpStateMu.Lock()
 	if tuiDumpState == "running" || tuiDumpState == "stopped" {
-		machine = tuiDumpState
 		if tuiDumpState == "running" {
 			state = tuiTr("HealthBadgeRunning", a.t, "Running")
 			snap.probe = "healthy"
@@ -641,7 +639,12 @@ func (a *tuiApp) refreshLocked() {
 	fmt.Fprintf(&sb, "%-11s %s\n", tuiTr("HealthLabelPort", a.t, "Port"), snap.port)
 	fmt.Fprintf(&sb, "%-11s %s\n", tuiTr("HealthLabelNode", a.t, "Node"), snap.nodeVer)
 	trayOn := tuiTr("TuiOff", a.t, "Off")
-	if isAutoStartEnabled() {
+	// The row reports REALITY, not the autostart setting: a panel answering
+	// on the panel port (client mode: icon present, serving) or our own
+	// tray process in direct mode means açık; otherwise kapalı. The old
+	// code read isAutoStartEnabled (boot setting), so a live tray with the
+	// setting off printed Kapalı.
+	if tuiTrayLabel(tuiCachedPanelServing(), tuiOwnTrayRunning()) {
 		trayOn = tuiTr("TuiOn", a.t, "On")
 	}
 	fmt.Fprintf(&sb, "%-11s %s\n", tuiTr("TuiTray", a.t, "Tray"), trayOn)
@@ -660,7 +663,11 @@ func (a *tuiApp) refreshLocked() {
 		fmt.Fprintf(&sb, "%s\n", snap.opPhase)
 	}
 	a.status.SetText(strings.TrimRight(sb.String(), "\n"))
-	snap.status = machine
+	// The action list rebuilds from the RESOLVED display state: `machine`
+	// still holds the stale pre-probe token, so derive the token from the
+	// same `state` the status rows just painted. Otherwise running shows
+	// Baslat until something else rebuilds the list.
+	snap.status = tuiMachineState(state, a.t)
 	a.syncListsLocked(snap)
 	a.renderLogsLocked(snap)
 	fw := a.lastW
@@ -758,6 +765,56 @@ func tuiDisplayState(snap tuiSnapshot, probe string, t map[string]string) (strin
 	}
 }
 
+// tuiMachineState resolves the LOCALIZED display label back to the machine
+// token the entry builder switches on. The status pane shows `state`
+// (localized); the action list must rebuild from the same resolved state,
+// or a running service keeps showing Başlat after the badge flips.
+func tuiMachineState(display string, t map[string]string) string {
+	switch display {
+	case tuiTr("HealthBadgeRunning", t, "Running"):
+		return "running"
+	case tuiTr("HealthBadgeStopped", t, "Stopped"):
+		return "stopped"
+	case tuiTr("HealthBadgeNotInstalled", t, "Not installed"):
+		return "not_installed"
+	case tuiTr("HealthBadgePortConflict", t, "Port conflict"):
+		return "port_conflict"
+	case tuiTr("HealthBadgeCorrupt", t, "Corrupt"):
+		return "corrupt"
+	case tuiTr("HealthBadgeInstalling", t, "Installing"):
+		return "installing"
+	default:
+		return "unknown"
+	}
+}
+
+
+// tuiTrayLabel maps (panelServing, ownTrayAlive) to the açık truth value
+// the Tepsi row paints: either signal means the icon/serving reality is on.
+// Extracted so the mapping is unit-testable without a console.
+func tuiTrayLabel(panelServing, ownAlive bool) bool {
+	return panelServing || ownAlive
+}
+
+// tuiOwnTrayRunning reports whether OUR OWN tray/panel process is alive in
+// this session: the bootstrap attached to an existing panel or spawned one.
+// Client mode (a panel answers) already implies açık via tuiCachedPanelServing;
+// this covers direct mode, where our tray runs but no panel answers (yet).
+// Pure read of session state: set once by ensureTrayForTUI, never spawned here.
+var tuiOwnTrayMu sync.Mutex
+var tuiOwnTrayAlive = false
+
+func tuiOwnTrayRunning() bool {
+	tuiOwnTrayMu.Lock()
+	defer tuiOwnTrayMu.Unlock()
+	return tuiOwnTrayAlive
+}
+
+func tuiSetOwnTrayAlive(v bool) {
+	tuiOwnTrayMu.Lock()
+	defer tuiOwnTrayMu.Unlock()
+	tuiOwnTrayAlive = v
+}
 
 // tuiThemeIsSystem reports whether cfg.Theme selects terminal defaults.
 func tuiThemeIsSystem() bool {
@@ -957,6 +1014,13 @@ func (a *tuiApp) activateListIndex(index int) {
 }
 
 
+// rootItems is the ONE pane order shared by construction and every relayout:
+// header, body, actions, footer. A single builder keeps the order from
+// diverging between paths (the keypress-swap bug rebuilt items ad hoc).
+func (a *tuiApp) rootItems() []tview.Primitive {
+	return []tview.Primitive{a.header, a.body, a.actionPane(), a.footer}
+}
+
 // mainLayout builds the stable root once: header + body + actions + footer.
 // The body holds status/logs; the visible action List sits below it as its
 // own focusable pane (double border + ► when focused). No TextView bar.
@@ -968,11 +1032,12 @@ func (a *tuiApp) mainLayout(width int) *tview.Flex {
 	a.logs.SetBorder(true)
 	a.footer.SetBorder(false)
 	a.syncActionPaneLocked()
+	items := a.rootItems()
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(a.header, 3, 0, false).
-		AddItem(a.body, 0, 1, false).
-		AddItem(a.actionPane(), 0, 1, false).
-		AddItem(a.footer, 1, 0, false)
+		AddItem(items[0], 3, 0, false).
+		AddItem(items[1], 0, 1, false).
+		AddItem(items[2], 0, 1, false).
+		AddItem(items[3], 1, 0, false)
 	return root
 }
 
@@ -984,7 +1049,10 @@ func (a *tuiApp) actionPane() tview.Primitive {
 }
 
 // syncActionPaneLocked re-parents the visible List after a section switch.
-// tview.Flex has no replace call: remove by identity, then add.
+// tview.Flex has no replace call: remove by identity, then re-insert at the
+// FIXED actions slot (index 2: header, body, actions, footer). Appending
+// instead would move the actions pane below the footer on every section
+// switch — the keypress pane-swap bug the owner photographed.
 func (a *tuiApp) syncActionPaneLocked() {
 	root := a.pages.GetPage("main")
 	flex, ok := root.(*tview.Flex)
@@ -998,7 +1066,23 @@ func (a *tuiApp) syncActionPaneLocked() {
 	}
 	vis := a.visibleListLocked()
 	flex.AddItem(vis, 0, 1, a.st.pane == tuiPaneActions)
+	a.moveActionsBeforeFooterLocked(flex)
 	a.applyFocusLocked()
+}
+
+// moveActionsBeforeFooterLocked keeps pane order header/body/actions/footer
+// after a re-parent: if the footer is not the last item, remove and re-add
+// it last. Caller holds a.mu.
+func (a *tuiApp) moveActionsBeforeFooterLocked(flex *tview.Flex) {
+	if flex.GetItemCount() < 2 {
+		return
+	}
+	last := flex.GetItem(flex.GetItemCount() - 1)
+	if last == a.footer {
+		return
+	}
+	flex.RemoveItem(a.footer)
+	flex.AddItem(a.footer, 1, 0, false)
 }
 
 func (a *tuiApp) applyFocusLocked() {
@@ -1096,13 +1180,7 @@ func (a *tuiApp) applyFocus() {
 func runTuiApp() {
 	tuiDiagLog("runTuiApp entry")
 	tuiDiagConsoleState("entry")
-	var restoreCP func()
-	if os.Getenv("ORPANEL_TUI_NO_RAW") == "1" {
-		tuiDiagLog("NO_RAW hatch: skipping code-page switch")
-		restoreCP = func() {}
-	} else {
-		restoreCP = tuiCodePageSwitch()
-	}
+	restoreCP := tuiCodePageSwitch()
 	defer restoreCP()
 	tuiDiagConsoleState("after-own-setup")
 	tuiDiagLog("newTuiApp start")
@@ -1110,15 +1188,15 @@ func runTuiApp() {
 	// Mouse comes from the library: one call requests the terminal mouse
 	// protocol; List/TextView/Modal handlers do the rest (§3). OUR hover
 	// is separate (SetMouseCapture below): motion → › marker repaint.
-	// ORPANEL_TUI_NO_MOUSE=1 skips EnableMouse (bisect hatch: mouse makes
-	// tcell take the VT-input path; keyboard stays complete without it).
-	if os.Getenv("ORPANEL_TUI_NO_MOUSE") == "1" {
-		tuiDiagLog("NO_MOUSE hatch: skipping EnableMouse")
-	} else {
-		a.app.EnableMouse(true)
-	}
+	a.app.EnableMouse(true)
 	a.setupMouseCapture()
 	tuiDiagLog("newTuiApp done (root set at construction)")
+	// Layout class once before Run, outside any draw cycle (see the
+	// after-draw rule above): same function the resize path runs.
+	if w0, h0, err := tuiConsoleSize(); err == nil && w0 > 0 && h0 > 0 {
+		a.applyBodyClass(w0)
+		tuiDiagLog("pre-Run body class set size=%dx%d", w0, h0)
+	}
 	a.refresh()
 	tuiDiagLog("refresh done")
 	a.applyFocus()
@@ -1135,61 +1213,18 @@ func runTuiApp() {
 		return 80, 24
 	}
 	var afterDraws int64
+	// STRUCTURAL RULE: the after-draw callback is strictly read-only — no
+	// tree mutation (Flex/Grid Clear/AddItem, SetRect, SetFocus, page ops),
+	// no a.mu, no tuiDiagScreenRow over live rects beyond plain counters.
+	// The v1.5.x blank-TUI regression was applyBodyClassLocked (Clear +
+	// re-add + SetFocus under a.mu) running inside tview's draw(): the
+	// owner's screen stayed cleared while draws kept counting. Layout now
+	// adapts on EventResize in the input path (below) and once before Run.
 	a.app.SetAfterDrawFunc(func(screen tcell.Screen) {
 		n := atomic.AddInt64(&afterDraws, 1)
 		w, h := screen.Size()
 		tuiDiagLog("afterDraw #%d size=%dx%d", n, w, h)
-		// Read FIRST, before applyBodyClass mutates the tree below: draw()
-		// holds the app lock through after(), so no draw interleaves, but
-		// applyBodyClass Clear()s + re-adds the body AFTER root.Draw
-		// painted — reading after it sees the new tree against old cells.
-		// Same screen object, pre-mutation = truth.
-		if tuiDiagOn() && (n == 1 || n == 2 || n == 4) {
-			// Positions from the LIVE rects, not arithmetic: the action
-			// List sits wherever the layout put it (draw #1: y=16..28).
-			l := a.visibleListLocked()
-			lx, ly, lw, lh := 0, 0, 0, 0
-			if l != nil {
-				lx, ly, lw, lh = l.GetRect()
-			}
-			_ = lx
-			_ = lw
-			_ = lh
-			tuiDiagLog("draw#%d header=%s border=%s", n,
-				tuiDiagScreenRow(screen, 0, 0, 40), tuiDiagScreenRow(screen, 0, 3, 40))
-			front, _ := a.pages.GetFrontPage()
-			tuiDiagLog("draw#%d pages=%d front=%q ly=%d", n,
-				a.pages.GetPageCount(), front, ly)
-			tuiDiagLog("draw#%d actions y=%d act0=%s act1=%s act2=%s act3=%s", n, ly,
-				tuiDiagScreenRow(screen, 0, ly+1, 80), tuiDiagScreenRow(screen, 0, ly+2, 80),
-				tuiDiagScreenRow(screen, 0, ly+3, 80), tuiDiagScreenRow(screen, 0, ly+4, 80))
-			tuiDiagLog("draw#%d status srow0=%s srow4=%s srow5=%s", n,
-				tuiDiagScreenRow(screen, 0, 4, 60), tuiDiagScreenRow(screen, 0, 8, 60),
-				tuiDiagScreenRow(screen, 0, 9, 60))
-		}
-		if w > 0 && h > 0 {
-			a.mu.Lock()
-			a.lastW, a.lastH = w, h
-			a.applyBodyClassLocked(w)
-			a.mu.Unlock()
-		}
 		tuiDiagLog("afterDraw #%d exit", n)
-		if n == 1 {
-			go func() {
-				time.Sleep(300 * time.Millisecond)
-				_, hh := screen.Size()
-				tuiDiagLog("first-draw cells row0=%s title=%s border=%s bar=%s logrow=%s",
-					tuiDiagReadCells(0, 0, 20), tuiDiagReadCells(2, 0, 30), tuiDiagReadCells(0, 3, 20),
-					tuiDiagReadCells(0, hh-3, 60), tuiDiagReadCells(0, 4, 60))
-				tuiDiagLog("first-draw actions act0=%s act1=%s act2=%s act3=%s",
-					tuiDiagReadCells(0, hh-7, 60), tuiDiagReadCells(0, hh-6, 60),
-					tuiDiagReadCells(0, hh-5, 60), tuiDiagReadCells(0, hh-4, 60))
-				tuiDiagLog("first-draw status srow0=%s srow1=%s srow2=%s srow3=%s srow4=%s srow5=%s",
-					tuiDiagReadCells(0, 4, 40), tuiDiagReadCells(0, 5, 40), tuiDiagReadCells(0, 6, 40),
-					tuiDiagReadCells(0, 7, 40), tuiDiagReadCells(0, 8, 40), tuiDiagReadCells(0, 9, 40))
-				tuiDiagConsoleState("after-first-draw")
-			}()
-		}
 	})
 	tick := time.NewTicker(1 * time.Second)
 	defer tick.Stop()
@@ -1273,6 +1308,15 @@ func (a *tuiApp) setupInputCapture() {
 				return nil
 			}
 		}
+		// Resize adaptation OUTSIDE draw: re-class the body only when the
+		// console width actually changed since the last applied width.
+		// tview re-lays-out on every draw from current rects, so this only
+		// switches the stacked/two-column class, never per-draw geometry.
+		// Unconditional re-class on every key rebuilt the Flex and swapped
+		// pane order mid-session; the guard below keeps order stable.
+		if w, _, err := tuiConsoleSize(); err == nil && w > 0 && w != a.lastW {
+			a.applyBodyClass(w)
+		}
 		out := a.handleKeyEvent(ev)
 		a.mu.Lock()
 		quit := a.st.quit
@@ -1293,10 +1337,16 @@ func (a *tuiApp) setupInputCapture() {
 // clicks/wheel/keyboard unaffected. Caller: runTuiApp (not tests directly).
 func (a *tuiApp) setupMouseCapture() {
 	a.app.SetMouseCapture(func(ev *tcell.EventMouse, action tview.MouseAction) (*tcell.EventMouse, tview.MouseAction) {
+		// Clicks/wheel reach the List's OWN MouseHandler untouched: it owns
+		// selection (SetCurrentItem), activation (SelectedFunc) and focus.
+		// Only motion is ours, and it must repaint IMMEDIATELY from the
+		// event — the 1s tick never drove hover; the ~2s lag was the next
+		// tick's queued refresh repainting a state handleMouseMove set.
 		if action != tview.MouseMove {
 			return ev, action
 		}
 		a.handleMouseMove(ev)
+		a.app.Draw()
 		return ev, action
 	})
 }

@@ -48,9 +48,54 @@ func tuiDiagReadCells(x, y, n int) string {
 	return fmt.Sprintf("%q(read=%d)", syscall.UTF16ToString(buf[:read]), read)
 }
 
+// tuiDiagConsoleRow opens CONOUT$ directly and reads the ACTIVE buffer via
+// ReadConsoleOutputCharacter + ReadConsoleOutputAttribute. Unlike STDOUT
+// (which may point at a stale handle), CONOUT$ always addresses the console
+// the user sees: this is ground truth for "did output reach the screen".
+// Env-gated, inert when unset.
+func tuiDiagConsoleRow(x, y, n int) string {
+	if !tuiDiagOn() {
+		return "<diag-off>"
+	}
+	h, err := windows.CreateFile(
+		windows.StringToUTF16Ptr("CONOUT$"),
+		windows.GENERIC_READ,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE,
+		nil, windows.OPEN_EXISTING, 0, 0)
+	if err != nil {
+		return fmt.Sprintf("<conout-err %v>", err)
+	}
+	defer windows.CloseHandle(h)
+	cbuf := make([]uint16, n)
+	var read uint32
+	coord := uintptr(uint32(y)<<16 | uint32(x)&0xffff)
+	r, _, e := procReadConsoleOutputCharacter.Call(
+		uintptr(h),
+		uintptr(unsafe.Pointer(&cbuf[0])),
+		uintptr(n),
+		coord,
+		uintptr(unsafe.Pointer(&read)),
+	)
+	if r == 0 {
+		return fmt.Sprintf("<con-read-err %v>", e)
+	}
+	return fmt.Sprintf("%q(cread=%d)", syscall.UTF16ToString(cbuf[:read]), read)
+}
+
+// tuiDiagCellStyle resolves fg/bg of one grid cell for the invisible-text
+// hypothesis (fg == bg, or a colour resolving identically on his terminal).
+// Env-gated, inert when unset.
+func tuiDiagCellStyle(screen tuiDiagScreen, x, y int) string {
+	if !tuiDiagOn() {
+		return "<diag-off>"
+	}
+	main, _, style, _ := screen.GetContent(x, y)
+	fg, bg, _ := style.Decompose()
+	return fmt.Sprintf("%q fg=%d bg=%d", string(main), int64(fg), int64(bg))
+}
+
 // tuiDiagScreenRow reads n cells of row y from the tcell screen tview just
 // painted (the after-draw callback parameter). Same object, same draw call:
-// no console round-trip, no stale buffer. Env-gated, inert when unset.
 func tuiDiagScreenRow(screen tuiDiagScreen, x, y, n int) string {
 	if !tuiDiagOn() {
 		return "<diag-off>"
@@ -70,6 +115,14 @@ func tuiDiagScreenRow(screen tuiDiagScreen, x, y, n int) string {
 	}
 	return fmt.Sprintf("%q", string(runes))
 }
+// tuiDiagThemeName resolves the effective palette name for the log.
+func tuiDiagThemeName() string {
+	if tuiNoColor() {
+		return "nocolor"
+	}
+	return loadConfig().Theme
+}
+
 // tuiDiag is env-gated instrumentation (ORPANEL_TUI_DIAG=1) writing stage
 // lines to %TEMP%/orpanel-tui-diag.log. Opt-in only; normal path untouched.
 func tuiDiagOn() bool { return os.Getenv("ORPANEL_TUI_DIAG") == "1" }

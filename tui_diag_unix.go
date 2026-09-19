@@ -21,3 +21,15 @@ func tuiDiagReadCells(int, int, int) string {
 func tuiDiagScreenRow(_ tuiDiagScreen, _, _, _ int) string {
 	return "<unix>"
 }
+
+func tuiDiagConsoleRow(_, _, _ int) string {
+	return "<unix>"
+}
+
+func tuiDiagCellStyle(_ tuiDiagScreen, _, _ int) string {
+	return "<unix>"
+}
+
+func tuiDiagThemeName() string {
+	return "<unix>"
+}

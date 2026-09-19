@@ -106,8 +106,10 @@ func ensureTrayForTUI() bool {
 	decision, _ := decideTrayBootstrap(prodTrayDeps(), exe)
 	switch decision {
 	case trayClientExisting, trayClientSpawned:
+		tuiSetOwnTrayAlive(true)
 		return true
 	default:
+		tuiSetOwnTrayAlive(false)
 		return false
 	}
 }

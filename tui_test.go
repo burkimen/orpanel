@@ -1213,3 +1213,202 @@ func TestSplitQuitSentences(t *testing.T) {
 		t.Fatalf("path split: %q", p)
 	}
 }
+
+// TestAfterDrawIsReadOnly gates the v1.5.x blank-TUI regression: the
+// after-draw callback must never mutate the primitive tree (Flex/Grid
+// Clear/AddItem, SetRect, SetFocus, page ops) nor take the app lock. It
+// asserts this structurally: the installed callback's source must not
+// reference the mutating calls. Layout adapts on the resize path instead.
+func TestAfterDrawIsReadOnly(t *testing.T) {
+	data, err := os.ReadFile("tui_tview.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(data)
+	start := strings.Index(src, "SetAfterDrawFunc(func(screen tcell.Screen) {")
+	if start < 0 {
+		// No after-draw callback installed at all: trivially read-only.
+		return
+	}
+	depth, end := 0, -1
+	for i := start; i < len(src); i++ {
+		switch src[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				end = i
+				break
+			}
+		}
+		if end >= 0 {
+			break
+		}
+	}
+	if end < 0 {
+		t.Fatalf("unbalanced after-draw callback")
+	}
+	body := src[start:end]
+	for _, banned := range []string{
+		".Clear()", "AddItem(", "SetRect(", "SetFocus(", "AddPage(",
+		"RemovePage(", "ShowPage(", "SwitchToPage(", "applyBodyClass",
+		"applyFocus", "syncLists", "a.mu.Lock",
+	} {
+		if strings.Contains(body, banned) {
+			t.Fatalf("after-draw callback must stay read-only, found %q", banned)
+		}
+	}
+}
+
+func TestAfterDrawResizeAdapts(t *testing.T) {
+	a := tuiTestApp()
+	simText(t, a, 99, 24)
+	if a.wide {
+		t.Fatalf("99 cols must be narrow class")
+	}
+	simText(t, a, 120, 30)
+	simPress(a, "down")
+	a.applyBodyClass(120)
+	if !a.wide {
+		t.Fatalf("120 cols must be wide class after event-path resize")
+	}
+	f := simText(t, a, 120, 30)
+	if !strings.Contains(f, "tart") || !strings.Contains(f, "tus") {
+		t.Fatalf("wide frame missing panes:\n%s", f)
+	}
+}
+
+// TestKeypressKeepsPaneOrder: pressing keys at a fixed width must not move
+// the footer or swap the actions pane (the keypress-relayout bug rebuilt the
+// Flex on every key and swapped hint/actions order mid-session).
+func TestKeypressKeepsPaneOrder(t *testing.T) {
+	a := tuiTestApp()
+	before := simText(t, a, 120, 30)
+	linesB := strings.Split(before, "\n")
+	footB, actB := -1, -1
+	for i, ln := range linesB {
+		if strings.Contains(ln, "Tab switch pane") || strings.Contains(ln, "Tab panel de") {
+			footB = i
+		}
+		if strings.Contains(ln, "Başlat") || strings.Contains(ln, "Durdur") || strings.Contains(ln, "Start") || strings.Contains(ln, "Stop") {
+			if actB < 0 {
+				actB = i
+			}
+		}
+	}
+	simPress(a, "down", "down", "up", "down")
+	after := simText(t, a, 120, 30)
+	linesA := strings.Split(after, "\n")
+	footA, actA := -1, -1
+	for i, ln := range linesA {
+		if strings.Contains(ln, "Tab switch pane") || strings.Contains(ln, "Tab panel de") {
+			footA = i
+		}
+		if strings.Contains(ln, "Başlat") || strings.Contains(ln, "Durdur") || strings.Contains(ln, "Start") || strings.Contains(ln, "Stop") {
+			if actA < 0 {
+				actA = i
+			}
+		}
+	}
+	if footB < 0 || footA < 0 {
+		t.Fatalf("footer hint row not found before=%d after=%d", footB, footA)
+	}
+	if footB != footA {
+		t.Fatalf("footer moved on keypress %d->%d", footB, footA)
+	}
+	if actB < 0 || actA < 0 {
+		t.Fatalf("action row not found before=%d after=%d", actB, actA)
+	}
+	if actA != actB {
+		t.Fatalf("actions pane moved on keypress %d->%d", actB, actA)
+	}
+	if footA < actA {
+		t.Fatalf("footer above actions pane (swapped order)")
+	}
+}
+
+// TestActionSetFollowsResolvedState: the action list rebuilds from the same
+// resolved state the status rows paint. Running snapshot → first entry is
+// the stop action; stopped snapshot → the start action. Catches the stale
+// Başlat-while-running bug (list built from pre-probe token).
+func TestActionSetFollowsResolvedState(t *testing.T) {
+	a := tuiTestApp()
+	a.t = loadTranslations("en")
+	runRows := tuiEntriesFor(tuiSecTop, a.t, tuiSnapshot{status: "running"})
+	if len(runRows) == 0 || runRows[0].id != tuiActStop {
+		t.Fatalf("running first entry = %+v, want stop action", runRows)
+	}
+	stopRows := tuiEntriesFor(tuiSecTop, a.t, tuiSnapshot{status: "stopped"})
+	if len(stopRows) == 0 || stopRows[0].id != tuiActStart {
+		t.Fatalf("stopped first entry = %+v, want start action", stopRows)
+	}
+	if got := tuiMachineState("Running", a.t); got != "running" {
+		t.Fatalf("machine state Running = %q", got)
+	}
+	if got := tuiMachineState("Stopped", a.t); got != "stopped" {
+		t.Fatalf("machine state Stopped = %q", got)
+	}
+}
+
+// TestClickMovesSelection: a synthetic click event on a List row must move
+// the List's own selection (the library owns selection; our capture must
+// forward clicks, never swallow them). Real-terminal click needs his screen;
+// this proves the event reaches the primitive.
+func TestClickMovesSelection(t *testing.T) {
+	a := tuiTestApp()
+	simText(t, a, 80, 24)
+	l := a.visibleListLocked()
+	rx, ry, _, _ := l.GetInnerRect()
+	sel := l.GetCurrentItem()
+	target := sel + 1
+	if target >= l.GetItemCount() {
+		target = 0
+	}
+	ev := tcell.NewEventMouse(rx, ry+target, tcell.ButtonPrimary, tcell.ModNone)
+	l.MouseHandler()(tview.MouseLeftClick, ev, func(p tview.Primitive) {})
+	if got := l.GetCurrentItem(); got != target {
+		t.Fatalf("click did not move selection to %d (at %d)", target, got)
+	}
+}
+
+// TestClickActivatesSelectedRow: clicking the already-selected row must fire
+// its SelectedFunc (open section or confirm gated action). Uses a tracer
+// SelectedFunc so no real action runs.
+func TestClickActivatesSelectedRow(t *testing.T) {
+	a := tuiTestApp()
+	simText(t, a, 80, 24)
+	l := a.visibleListLocked()
+	fired := -1
+	for i := 0; i < l.GetItemCount(); i++ {
+		i := i
+		l.SetSelectedFunc(func(index int, _ string, _ string, _ rune) {
+			fired = index
+			_ = i
+		})
+		_ = i
+		break
+	}
+	rx, ry, _, _ := l.GetInnerRect()
+	cur := l.GetCurrentItem()
+	ev := tcell.NewEventMouse(rx, ry+cur, tcell.ButtonPrimary, tcell.ModNone)
+	l.MouseHandler()(tview.MouseLeftClick, ev, func(p tview.Primitive) {})
+	if fired != cur {
+		t.Fatalf("click on selected row %d fired %d", cur, fired)
+	}
+}
+
+// TestTrayRowReflectsReality: client mode (panel answers) → açık; own tray
+// alive in direct mode → açık; neither → kapalı. The old code read the
+// autostart boot setting, so a live tray printed Kapalı.
+func TestTrayRowReflectsReality(t *testing.T) {
+	if !tuiTrayLabel(true, false) {
+		t.Fatalf("panel serving must read açık")
+	}
+	if !tuiTrayLabel(false, true) {
+		t.Fatalf("own tray alive must read açık")
+	}
+	if tuiTrayLabel(false, false) {
+		t.Fatalf("no panel and no tray must read kapalı")
+	}
+}
